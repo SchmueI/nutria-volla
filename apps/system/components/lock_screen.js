@@ -251,8 +251,8 @@ class LockScreen extends HTMLElement {
         hour12: false,
       });
     }
-    this.time.textContent = this.timeFormat.format(now);
-
+    this.time.textContent = this.timeFormat.format(now).replace(":", "\n");
+    
     if (!this.dateFormat) {
       this.dateFormat = new Intl.DateTimeFormat("default", {
         weekday: "long",
@@ -261,7 +261,7 @@ class LockScreen extends HTMLElement {
         timeZone: "UTC",
       });
     }
-    this.date.textContent = this.dateFormat.format(now);
+    this.date.textContent = this.dateFormat.format(now).replace(", ", ",\n");
   }
 
   reset() {
