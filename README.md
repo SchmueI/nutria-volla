@@ -1,4 +1,4 @@
-# Nutria: An Experimental Web Based OS Frontend
+# Nutria-Volla: An Experimental Web Based Volla Launcher
 
 This repo contains a suite of apps and their build system. Several running mode are available:
 
@@ -12,8 +12,8 @@ The included build system is available by running the `jackady` (spelled like th
 If you want to contribute, please read the [Contributing Guide](./docs/contributing.md) and [Debugging Guide](./docs/debugging.md).
 
 [
-<img src="./screenshots/mobile-1.webp" width=240 alt="Mobile Version" title="Nutria in Mobile Mode">
-<img src="./screenshots/desktop-1.webp" width=400 alt="Desktop Version" title="Nutria in Desktop Mode">
+<img src="./screenshots/LockScreen.png" width=240 alt="Lock Screen with Volla Theeming" title="Lock Screen">
+<img src="./screenshots/Springboard.png" width=400 alt="Springboard" title="Springboard">
 ](https://capyloon.org)
 
 # Prerequisites
