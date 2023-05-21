@@ -11,10 +11,9 @@ The included build system is available by running the `jackady` (spelled like th
 
 If you want to contribute, please read the [Contributing Guide](./docs/contributing.md) and [Debugging Guide](./docs/debugging.md).
 
-[
 <img src="./screenshots/LockScreen.png" height=500 alt="Lock Screen with Volla Theeming" title="Lock Screen">
 <img src="./screenshots/Springboard.png" height=500 alt="Springboard" title="Springboard">
-](https://capyloon.org)
+<img src="./screenshots/Springpoint.png" height=500 alt="Springpoint" title="Springpoint">
 
 # Prerequisites
 
