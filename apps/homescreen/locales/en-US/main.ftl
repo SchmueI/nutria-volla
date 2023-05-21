@@ -1,7 +1,7 @@
 # Search box
 search-box-placeholder =
-    .placeholder = Browse, Search or Ask…
-    .aria-label = Browse, Search or Ask
+    .placeholder = Type something...
+    .aria-label = Type something...
 
 # Search sections titles
 top-sites-title = Top Sites
