@@ -10,11 +10,11 @@ This repo contains a suite of apps and their build system. Several running mode 
 The included build system is available by running the `jackady` (spelled like the French "Jacques a dit") command. This lets you run locally in development or production mode, and manage device operations.
 
 If you want to contribute, please read the [Contributing Guide](./docs/contributing.md) and [Debugging Guide](./docs/debugging.md).
-
-<img src="./screenshots/LockScreen.png" height=500 alt="Lock Screen with Volla Theeming" title="Lock Screen">
-<img src="./screenshots/Springboard.png" height=500 alt="Springboard" title="Springboard">
-<img src="./screenshots/Springpoint.png" height=500 alt="Springpoint" title="Springpoint">
-
+<div>
+<img src="./screenshots/LockScreen.png" height=400px alt="Lock Screen with Volla Theeming" title="Lock Screen">
+<img src="./screenshots/Springboard.png" height=400px alt="Springboard" title="Springboard">
+<img src="./screenshots/Springpoint.png" height=400px alt="Springpoint" title="Springpoint">
+</div>
 # Prerequisites
 
 In order to develop locally, you need a stable Rust toolchain installed (eg. from https://rustup.rs/) since the first invocation of `jackady` will compile the build system.
