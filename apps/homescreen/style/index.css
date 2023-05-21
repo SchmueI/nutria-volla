@@ -75,6 +75,34 @@ body {
   color: white;
 }
 
+
+#springpoint{
+  top: 3%;
+  height: var(--search-box-height);
+  padding: 0.5em;
+  position: relative;                           //absolue
+  margin-left: 1px;                             // [  ]
+  float: left;                                  // [  ]
+  bottom: 0;
+  width: 95%;
+  height: 95%;
+  text-align: left;
+  transition: all 0.3s;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+}
+
+.dot{
+  height: 50px;
+  width: 50px;
+  background-color: red;
+  border-radius: 50%;
+  display: inline-block;
+  position: absolute; right: 0; bottom: 0;   //absolue
+  float: right;
+}
+
 #search-panel {
   top: 10%;
   height: var(--search-box-height);
