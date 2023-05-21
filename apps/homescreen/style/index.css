@@ -69,7 +69,7 @@ body {
   width: 100%;
   text-align: left;
   transition: all 0.3s;
-  z-index: 100;
+  z-index: 20;
   display: flex;
   flex-direction: column;
   color: white;
@@ -77,7 +77,7 @@ body {
 
 
 #springpoint{
-  top: 3%;
+  top: 40%;
   height: var(--search-box-height);
   padding: 0.5em;
   position: relative;                           //absolue
@@ -85,7 +85,7 @@ body {
   float: left;                                  // [  ]
   bottom: 0;
   width: 95%;
-  height: 95%;
+  height: 55%;
   text-align: left;
   transition: all 0.3s;
   z-index: 100;
@@ -101,6 +101,26 @@ body {
   display: inline-block;
   position: absolute; right: 0; bottom: 0;   //absolue
   float: right;
+  transition: 0.3s;
+}
+.dot:hover{
+    height: 165px;
+    width: 250px;
+    border-radius: 5%;
+}
+
+.dot .springText{
+    display: none;
+    font-size: 1.5em;
+}
+
+.dot .springText:hover{
+    font-size: 1.8em;
+    font-weight: bold;
+}
+
+.dot:hover .springText{
+    display: blocK;
 }
 
 #search-panel {
