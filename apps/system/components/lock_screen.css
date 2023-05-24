@@ -51,31 +51,18 @@
 }
 
 .clock {
-  margin-top: 80%;
-  text-align: left;
+  text-align: center;
   flex: 0.5;
-  display: block;
-  flex-direction: left;
-  justify-content: left;
-  align-items: left;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
   text-shadow: 0 3px 6px #333, 0 1px 0 #333;
 }
 
 .time {
   font-weight: normal;
-  font-size: 14em;
-  color: red;
-  line-height: 80%;
-}
-
-.time:first-line{
-    color: white
-}
-
-.date{
-    margin-top: 8%;
-    font-size: 1.5em;
-    color: white;
+  font-size: 4.5em;
 }
 
 .slider {

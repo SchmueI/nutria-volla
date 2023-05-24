@@ -1,0 +1,81 @@
+[
+  {
+    "id": "default-2",
+    "kind": "bookmark",
+    "title": "Wikipedia",
+    "url": "https://en.wikipedia.org",
+    "icon": "./resources/wikipedia.png",
+    "backgroundColor": "rgb(234, 236, 240)",
+    "position": "0, 0"
+  },
+  {
+    "id": "default-1",
+    "kind": "bookmark",
+    "title": "Elk",
+    "url": "https://elk.zone/",
+    "icon": "./resources/elk.png",
+    "backgroundColor": "#111111",
+    "position": "0, 1"
+  },
+  {
+    "id": "default-3",
+    "kind": "bookmark",
+    "title": "Matrix",
+    "url": "https://hydrogen.element.io/",
+    "icon": "./resources/matrix.png",
+    "backgroundColor": "white",
+    "position": "0, 2"
+  },
+  {
+    "id": "default-6",
+    "kind": "bookmark",
+    "title": "IPNS Filecoin",
+    "url": "ipns://filecoin.io",
+    "icon": "./resources/filecoin-logo.svg",
+    "backgroundColor": "white",
+    "position": "2, 0"
+  },
+  {
+    "id": "default-7",
+    "kind": "bookmark",
+    "title": "IPFS Wiki",
+    "url": "ipfs://bafybeiaysi4s6lnjev27ln5icwm6tueaw2vdykrtjkwiphwekaywqhcjze/wiki/English_Wikipedia",
+    "icon": "./resources/wikipedia.png",
+    "backgroundColor": "rgb(234, 236, 240)",
+    "position": "3, 0"
+  },
+  {
+    "id": "default-8",
+    "kind": "bookmark",
+    "title": "Publish IPFS",
+    "url": "https://capyloon.org/ipfs.html#publish",
+    "icon": "./resources/capyloon-logo.webp",
+    "backgroundColor": "wheat",
+    "position": "3, 2"
+  },
+  {
+    "id": "default-9",
+    "kind": "bookmark",
+    "title": "Places",
+    "url": "https://capyloon.org/places/index.html",
+    "icon": "./resources/capyloon-logo.webp",
+    "backgroundColor": "wheat",
+    "position": "2, 2"
+  },
+  {
+    "id": "default-4",
+    "kind": "widget",
+    "title": "World Clock",
+    "url": "http://widgets.localhost:__LOCAL_PORT__/worldclock/index.html",
+    "size": "2x1",
+    "position": "2, 4"
+  },
+  {
+    "id": "default-5",
+    "kind": "widget",
+    "title": "Weather",
+    "url": "http://widgets.localhost:__LOCAL_PORT__/weather/index.html",
+    "size": "2x2",
+    "position": "0, 3"
+  }
+]
