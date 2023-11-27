@@ -4,13 +4,11 @@
 
 // TODO: move to web-view.js
 let modules = {};
-XPCOMUtils.defineLazyModuleGetters(modules, {
+ChromeUtils.defineESModuleGetters(modules, {
   ContentBlockingAllowList:
-    "resource://gre/modules/ContentBlockingAllowList.jsm",
-  SafeBrowsing: "resource://gre/modules/SafeBrowsing.jsm",
+    "resource://gre/modules/ContentBlockingAllowList.sys.js",
+  SafeBrowsing: "resource://gre/modules/SafeBrowsing.sys.js",
 });
-
-const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 window.config.platform = AppConstants.platform;
 window.config.metaOrControl =
@@ -132,9 +130,16 @@ const UAHelper = {
         }
       }
 
+      // Make sure we set openWindowInfo to null when
+      // aParams.openWindoInfo is undefined.
+      let openWindowInfo = null;
+      if (aParams.openWindoInfo) {
+        openWindowInfo = aParams.openWindoInfo;
+      }
+
       let webView = exports.wm.openFrame(aURI, {
         activate: !isPrinting,
-        openWindowInfo: aParams.openWindowInfo,
+        openWindowInfo,
         details,
       });
       return webView;
@@ -310,6 +315,7 @@ const UAHelper = {
   };
 
   exports.embedder = embedder;
+  embedder.uaHelper = UAHelper;
 
   // Hacks.
   // Force a Mobile User Agent string.
@@ -344,6 +350,7 @@ const UAHelper = {
   } else {
     Services.prefs.setBoolPref("dom.inputmethod.enabled", true);
     Services.prefs.setBoolPref("dom.flashlight.enabled", true);
+    Services.prefs.setBoolPref("layout.accessiblecaret.hide_carets_for_mouse_input", false);
     embedder.useVirtualKeyboard = true;
   }
   embedder.sessionType = sessionType;

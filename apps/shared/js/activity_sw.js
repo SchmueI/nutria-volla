@@ -1,9 +1,9 @@
 function log(msg) {
-  console.log(`${self.location} ${msg}`);
+  console.log(`[act_sw:${self.location}] ${msg}`);
 }
 
 function error(msg) {
-  console.error(`${self.location} ${msg}`);
+  console.error(`[act_sw:${self.location}] ${msg}`);
 }
 
 self.addEventListener("install", (event) => {
@@ -28,7 +28,7 @@ self.addEventListener("systemmessage", async (event) => {
   event.waitUntil(promise);
 
   if (event.name === "activity") {
-    await handleActivity(event.data.webActivityRequestHandler());
+    await handleActivity(event, event.data.webActivityRequestHandler());
   } else {
     error(`Unexpected system message: ${event.name}`);
   }
@@ -61,14 +61,18 @@ async function getClient(activityName) {
   }
 }
 
-async function handleActivity(handler) {
+async function handleActivity(event, handler) {
   let source = handler.source;
   let activityName = source.name;
 
   // Get a handle to the app window.
   let win = await getClient(activityName);
 
-  if (HAS_RETURN_VALUE_ACTIVITIES.includes(activityName)) {
+  if (
+    HAS_RETURN_VALUE_ACTIVITIES &&
+    HAS_RETURN_VALUE_ACTIVITIES.includes(activityName)
+  ) {
+    event.waitUntil(handler.postDone());
     let activityId = ActivityRequests.addHandler(handler);
     log(`Sending message for ${activityName} with return value`);
 
@@ -76,13 +80,6 @@ async function handleActivity(handler) {
       topic: "activity",
       data: { source, activityId },
     });
-    // Start the 'keepalive message interval' when receiving the first activity message.
-    if (ActivityRequests.size === 1) {
-      win.postMessage({
-        topic: "system",
-        data: "start_activity_keepalive",
-      });
-    }
   } else {
     log(`Sending message for ${activityName} with no return value`);
     win.postMessage({
@@ -104,16 +101,8 @@ self.addEventListener("message", async (event) => {
         handler.postResult(data.result);
       }
       ActivityRequests.removeHandler(data.activityId);
-      // Stop the 'keepalive message interval' if there is no pending activity.
-      if (ActivityRequests.size === 0) {
-        let win = await getClient("");
-        win.postMessage({
-          topic: "system",
-          data: "stop_activity_keepalive",
-        });
-      }
     }
-  } else if (data.topic !== "keep-alive") {
+  } else {
     error(`Unexpected message topic: ${data.topic}`);
   }
 });
@@ -124,13 +113,13 @@ const ActivityRequests = {
   addHandler(handler) {
     const activityId = `${+new Date()}`;
     this.map.set(activityId, handler);
-    log(`ActivityRequests::addHandler: ${this.map}`);
+    log(`ActivityRequests::addHandler: ${this.map.size} entries`);
     return activityId;
   },
 
   removeHandler(id) {
     this.map.delete(id);
-    log(`ActivityRequests::removeHandler: ${this.map}`);
+    log(`ActivityRequests::removeHandler: ${this.map.size} entries`);
   },
 
   getHandler(id) {

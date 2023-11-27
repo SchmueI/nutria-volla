@@ -7,25 +7,6 @@ function postActivityResult(result) {
   );
 }
 
-let keepSWStateInterval;
-function postKeepaliveMessage() {
-  keepSWStateInterval = setInterval(() => {
-    // service worker alive -> idle timeout is 30000ms,
-    // post a dummy message to keep service worker alive
-    const result = {
-      isKeepalive: true,
-    };
-    postActivityResult(result);
-  }, 25000); // less than 30000ms
-}
-
-function cancelKeepaliveMessage() {
-  if (keepSWStateInterval) {
-    clearInterval(keepSWStateInterval);
-    keepSWStateInterval = null;
-  }
-}
-
 window.addEventListener("serviceworkermessage", ({ detail }) => {
   const { category, type, data } = detail;
   if (category === "systemmessage" && type === "activity") {
@@ -43,16 +24,17 @@ window.addEventListener("serviceworkermessage", ({ detail }) => {
           postActivityResult({ activityId, activityResult });
         });
         break;
+      case "open-about":
+        let url = source.data.url.toLowerCase();
+        if (url.startsWith("about:")) {
+          window.wm.openAbout(url);
+        } else {
+          console.error(`Invalid about: url: ${url}`);
+        }
+        break;
       default:
         console.error(`Unexpected system app activity name: ${source.name}`);
         break;
-    }
-  } else if (category === "systemmessage" && type === "activity_keepalive") {
-    console.log("activity_keepalive: ", data);
-    if (data === "start") {
-      postKeepaliveMessage();
-    } else if (data === "stop") {
-      cancelKeepaliveMessage();
     }
   }
 });

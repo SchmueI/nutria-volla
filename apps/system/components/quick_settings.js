@@ -34,6 +34,7 @@ class QuickSettings extends HTMLElement {
       <section class="notifications"></section>
       <section class="peers"></section>
       <section class="browser-actions"></section>
+      <media-controller-list></media-controller-list>
     </div>
     `;
 
@@ -206,8 +207,11 @@ class QuickSettings extends HTMLElement {
     actionsDispatcher.addListener(
       "flashlight-state-change",
       (_name, enabled) => {
-        flIcon.parentNode.variant = enabled ? "primary" : "neutral";
-        flIcon.setAttribute("name", enabled ? "flashlight" : "flashlight-off");
+        flIcon.variant = enabled ? "primary" : "neutral";
+        flIcon.firstElementChild.setAttribute(
+          "name",
+          enabled ? "flashlight" : "flashlight-off"
+        );
       }
     );
   }
@@ -267,6 +271,17 @@ class QuickSettings extends HTMLElement {
     }
   }
 
+  getNotifications() {
+    let result = [];
+    let notifs = this.shadowRoot.querySelectorAll(
+      ".notifications web-notification"
+    );
+    if (notifs) {
+      notifs.forEach((notif) => result.push(notif._wrapper.notification));
+    }
+    return result;
+  }
+
   initP2P() {
     let appHandler = this.updatePeerApps.bind(this);
     window.appsManager.addEventListener("app-installed", appHandler);
@@ -281,6 +296,16 @@ class QuickSettings extends HTMLElement {
       container.classList.add("not-launchable");
     } else {
       container.classList.remove("not-launchable");
+    }
+
+    let controlApps = await navigator.b2g.activityUtils.getInstalled(
+      "remote-control"
+    );
+    let remoteDisabled = controlApps.length == 0;
+    if (remoteDisabled) {
+      container.classList.add("not-remotable");
+    } else {
+      container.classList.remove("not-remotable");
     }
   }
 
@@ -303,6 +328,15 @@ class QuickSettings extends HTMLElement {
     apps.classList.add("launch");
     apps.classList.add("when-paired");
     node.append(apps);
+
+    let remote = document.createElement("sl-button");
+    remote.setAttribute("circle", "");
+    let icon = document.createElement("img");
+    icon.src = "./resources/remotecontrol.png";
+    remote.append(icon);
+    remote.classList.add("remote");
+    remote.classList.add("when-paired");
+    node.append(remote);
 
     let button = document.createElement("sl-button");
     button.dataset.l10nId = "connect-peer";
@@ -347,6 +381,15 @@ class QuickSettings extends HTMLElement {
             `p2p: failed to launch tile for session ${session.id}: ${e}`
           );
         }
+      };
+
+      node.querySelector(".remote").onclick = () => {
+        this.drawer.hide();
+        console.log(
+          `ZZZ starting remote control of ${JSON.stringify(session)}`
+        );
+        let act = new WebActivity("remote-control", { session });
+        act.start();
       };
       node.classList.add("paired");
     }

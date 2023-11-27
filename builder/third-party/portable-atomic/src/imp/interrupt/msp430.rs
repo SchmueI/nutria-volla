@@ -1,6 +1,8 @@
 // Adapted from https://github.com/rust-embedded/msp430.
 //
 // See also src/imp/msp430.rs.
+//
+// Refs: https://www.ti.com/lit/ug/slau208q/slau208q.pdf
 
 #[cfg(not(portable_atomic_no_asm))]
 use core::arch::asm;
@@ -12,13 +14,12 @@ pub(super) type State = u16;
 /// Disables interrupts and returns the previous interrupt state.
 #[inline]
 pub(super) fn disable() -> State {
-    let r: u16;
+    let r: State;
     // SAFETY: reading the status register and disabling interrupts are safe.
     // (see module-level comments of interrupt/mod.rs on the safety of using privileged instructions)
     unsafe {
         // Do not use `nomem` and `readonly` because prevent subsequent memory accesses from being reordered before interrupts are disabled.
         // Do not use `preserves_flags` because DINT modifies the GIE (global interrupt enable) bit of the status register.
-        // Refs: https://mspgcc.sourceforge.net/manual/x951.html
         #[cfg(not(portable_atomic_no_asm))]
         asm!(
             "mov R2, {0}",

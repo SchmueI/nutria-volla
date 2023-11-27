@@ -1,4 +1,7 @@
 // Adapted from https://github.com/Rahix/avr-device.
+//
+// Refs:
+// - AVR Instruction Set Manual https://ww1.microchip.com/downloads/en/DeviceDoc/AVR-InstructionSet-Manual-DS40002198.pdf
 
 #[cfg(not(portable_atomic_no_asm))]
 use core::arch::asm;
@@ -8,7 +11,7 @@ pub(super) type State = u8;
 /// Disables interrupts and returns the previous interrupt state.
 #[inline]
 pub(super) fn disable() -> State {
-    let sreg: u8;
+    let sreg: State;
     // SAFETY: reading the status register (SREG) and disabling interrupts are safe.
     // (see module-level comments of interrupt/mod.rs on the safety of using privileged instructions)
     unsafe {

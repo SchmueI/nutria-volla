@@ -10,16 +10,17 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2018"
-rust-version = "1.46"
+edition = "2021"
+rust-version = "1.61"
 name = "rustls-webpki"
-version = "0.100.1"
+version = "0.101.7"
 include = [
     "Cargo.toml",
-    "LICENSE",
+    "/LICENSE",
     "README.md",
     "src/calendar.rs",
     "src/cert.rs",
+    "src/crl.rs",
     "src/der.rs",
     "src/end_entity.rs",
     "src/error.rs",
@@ -33,21 +34,11 @@ include = [
     "src/signed_data.rs",
     "src/time.rs",
     "src/trust_anchor.rs",
+    "src/x509.rs",
     "src/verify_cert.rs",
     "src/lib.rs",
     "src/data/**/*",
-    "tests/dns_name_tests.rs",
-    "tests/integration.rs",
-    "tests/misc/serial_neg.der",
-    "tests/misc/serial_zero.der",
-    "tests/misc/serial_neg_ca.der",
-    "tests/misc/serial_neg_ee.der",
-    "tests/netflix/ca.der",
-    "tests/netflix/ee.der",
-    "tests/netflix/inter.der",
-    "tests/ed25519/ca.der",
-    "tests/ed25519/ee.der",
-    "third-party/chromium/**/*",
+    "tests/**",
 ]
 description = "Web PKI X.509 Certificate Verification."
 readme = "README.md"
@@ -55,17 +46,21 @@ categories = [
     "cryptography",
     "no-std",
 ]
-license-file = "LICENSE"
+license = "ISC"
 repository = "https://github.com/rustls/webpki"
 
 [package.metadata.docs.rs]
 all-features = true
+rustdoc-args = [
+    "--cfg",
+    "docsrs",
+]
 
 [profile.bench]
 opt-level = 3
 lto = true
 codegen-units = 1
-debug = false
+debug = 0
 debug-assertions = false
 rpath = false
 
@@ -73,22 +68,44 @@ rpath = false
 opt-level = 3
 lto = true
 codegen-units = 1
-debug = false
+debug = 0
 debug-assertions = false
 rpath = false
 
 [lib]
 name = "webpki"
 
+[[bench]]
+name = "benchmarks"
+path = "benches/benchmark.rs"
+harness = false
+
 [dependencies.ring]
-version = "0.16.19"
+version = "0.17"
 default-features = false
 
 [dependencies.untrusted]
-version = "0.7.1"
+version = "0.9"
 
 [dev-dependencies.base64]
-version = "0.13"
+version = "0.21"
+
+[dev-dependencies.bencher]
+version = "0.1.5"
+
+[dev-dependencies.once_cell]
+version = "1.17.2"
+
+[dev-dependencies.rcgen]
+version = "0.11.3"
+default-features = false
+
+[dev-dependencies.serde]
+version = "1.0"
+features = ["derive"]
+
+[dev-dependencies.serde_json]
+version = "1.0"
 
 [features]
 alloc = ["ring/alloc"]

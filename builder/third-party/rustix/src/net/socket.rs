@@ -3,19 +3,9 @@ use crate::net::{SocketAddr, SocketAddrAny, SocketAddrV4, SocketAddrV6};
 use crate::{backend, io};
 use backend::fd::{AsFd, BorrowedFd};
 
+pub use crate::net::{AddressFamily, Protocol, Shutdown, SocketFlags, SocketType};
 #[cfg(unix)]
 pub use backend::net::addr::SocketAddrUnix;
-pub use backend::net::types::{AddressFamily, Protocol, Shutdown, SocketFlags, SocketType};
-
-/// Compatibility alias for `SocketFlags`. Use `SocketFlags` instead of this.
-pub type AcceptFlags = SocketFlags;
-
-impl Default for Protocol {
-    #[inline]
-    fn default() -> Self {
-        Self::IP
-    }
-}
 
 /// `socket(domain, type_, protocol)`—Creates a socket.
 ///
@@ -23,7 +13,8 @@ impl Default for Protocol {
 /// however it is not safe in general to rely on this, as file descriptors may
 /// be unexpectedly allocated on other threads or in libraries.
 ///
-/// To pass extra flags such as [`SocketFlags::CLOEXEC`], use [`socket_with`].
+/// To pass extra flags such as [`SocketFlags::CLOEXEC`] or
+/// [`SocketFlags::NONBLOCK`], use [`socket_with`].
 ///
 /// # References
 ///  - [Beej's Guide to Network Programming]
@@ -50,7 +41,11 @@ impl Default for Protocol {
 /// [illumos]: https://illumos.org/man/3SOCKET/socket
 /// [glibc]: https://www.gnu.org/software/libc/manual/html_node/Creating-a-Socket.html
 #[inline]
-pub fn socket(domain: AddressFamily, type_: SocketType, protocol: Protocol) -> io::Result<OwnedFd> {
+pub fn socket(
+    domain: AddressFamily,
+    type_: SocketType,
+    protocol: Option<Protocol>,
+) -> io::Result<OwnedFd> {
     backend::net::syscalls::socket(domain, type_, protocol)
 }
 
@@ -88,12 +83,13 @@ pub fn socket(domain: AddressFamily, type_: SocketType, protocol: Protocol) -> i
 /// [DragonFly BSD]: https://man.dragonflybsd.org/?command=socket&section=2
 /// [illumos]: https://illumos.org/man/3SOCKET/socket
 /// [glibc]: https://www.gnu.org/software/libc/manual/html_node/Creating-a-Socket.html
+#[doc(alias("socket"))]
 #[inline]
 pub fn socket_with(
     domain: AddressFamily,
     type_: SocketType,
     flags: SocketFlags,
-    protocol: Protocol,
+    protocol: Option<Protocol>,
 ) -> io::Result<OwnedFd> {
     backend::net::syscalls::socket_with(domain, type_, flags, protocol)
 }
@@ -277,6 +273,10 @@ pub fn bind_unix<Fd: AsFd>(sockfd: Fd, addr: &SocketAddrUnix) -> io::Result<()> 
 
 /// `connect(sockfd, addr)`—Initiates a connection to an IP address.
 ///
+/// On Windows, a non-blocking socket returns [`Errno::WOULDBLOCK`] if the
+/// connection cannot be completed immediately, rather than
+/// `Errno::INPROGRESS`.
+///
 /// # References
 ///  - [Beej's Guide to Network Programming]
 ///  - [POSIX]
@@ -301,6 +301,7 @@ pub fn bind_unix<Fd: AsFd>(sockfd: Fd, addr: &SocketAddrUnix) -> io::Result<()> 
 /// [DragonFly BSD]: https://man.dragonflybsd.org/?command=connect&section=2
 /// [illumos]: https://illumos.org/man/3SOCKET/connect
 /// [glibc]: https://www.gnu.org/software/libc/manual/html_node/Connecting.html
+/// [`Errno::WOULDBLOCK`]: io::Errno::WOULDBLOCK
 pub fn connect<Fd: AsFd>(sockfd: Fd, addr: &SocketAddr) -> io::Result<()> {
     _connect(sockfd.as_fd(), addr)
 }
@@ -450,6 +451,44 @@ pub fn connect_v6<Fd: AsFd>(sockfd: Fd, addr: &SocketAddrV6) -> io::Result<()> {
 #[doc(alias = "connect")]
 pub fn connect_unix<Fd: AsFd>(sockfd: Fd, addr: &SocketAddrUnix) -> io::Result<()> {
     backend::net::syscalls::connect_unix(sockfd.as_fd(), addr)
+}
+
+/// `connect(sockfd, {.sa_family = AF_UNSPEC}, sizeof(struct sockaddr))`
+/// — Dissolve the socket's association.
+///
+/// On UDP sockets, BSD platforms report [`Errno::AFNOSUPPORT`] or
+/// [`Errno::INVAL`] even if the disconnect was successful.
+///
+/// # References
+///  - [Beej's Guide to Network Programming]
+///  - [POSIX]
+///  - [Linux]
+///  - [Apple]
+///  - [Winsock2]
+///  - [FreeBSD]
+///  - [NetBSD]
+///  - [OpenBSD]
+///  - [DragonFly BSD]
+///  - [illumos]
+///  - [glibc]
+///
+/// [Beej's Guide to Network Programming]: https://beej.us/guide/bgnet/html/split/system-calls-or-bust.html#connect
+/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9699919799/functions/connect.html
+/// [Linux]: https://man7.org/linux/man-pages/man2/connect.2.html
+/// [Apple]: https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/connect.2.html
+/// [Winsock2]: https://docs.microsoft.com/en-us/windows/win32/api/winsock2/nf-winsock2-connect
+/// [FreeBSD]: https://man.freebsd.org/cgi/man.cgi?query=connect&sektion=2
+/// [NetBSD]: https://man.netbsd.org/connect.2
+/// [OpenBSD]: https://man.openbsd.org/connect.2
+/// [DragonFly BSD]: https://man.dragonflybsd.org/?command=connect&section=2
+/// [illumos]: https://illumos.org/man/3SOCKET/connect
+/// [glibc]: https://www.gnu.org/software/libc/manual/html_node/Connecting.html
+/// [`Errno::AFNOSUPPORT`]: io::Errno::AFNOSUPPORT
+/// [`Errno::INVAL`]: io::Errno::INVAL
+#[inline]
+#[doc(alias = "connect")]
+pub fn connect_unspec<Fd: AsFd>(sockfd: Fd) -> io::Result<()> {
+    backend::net::syscalls::connect_unspec(sockfd.as_fd())
 }
 
 /// `listen(fd, backlog)`—Enables listening for incoming connections.

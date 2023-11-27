@@ -1,0 +1,107 @@
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: var(--sl-panel-background-color);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+#main {
+  display: flex;
+  flex-direction: column;
+  gap: 1em;
+  align-items: center;
+  justify-content: center;
+  padding: 1em;
+  height: 100%;
+}
+
+h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90vw;
+}
+
+#remote-keys {
+  display: grid;
+  gap: 0.3em;
+  font-size: 2em;
+  border: 4px solid var(--sl-color-primary-500);
+  border-radius: var(--sl-border-radius-circle);
+  padding: 2em;
+  background-color: var(--sl-color-primary-100);
+  grid-template-areas:
+    ".      up   ."
+    "left   ok   right"
+    ".      down ."
+    "sh-tab tab  home";
+}
+
+#keyboard {
+  width: fit-content;
+  display: grid;
+  gap: 0.5em;
+  font-size: 2em;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-areas:
+    "n7 n8 n9"
+    "n4 n5 n6"
+    "n1 n2 n3"
+    "n0 back enter";
+}
+
+/* Based on https://developer.mozilla.org/en-US/docs/Web/HTML/Element/kbd */
+sl-icon,
+#keyboard .key {
+  background-color: #eee;
+  border-radius: 3px;
+  border: 1px solid #b4b4b4;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.2),
+    0 2px 0 0 rgba(255, 255, 255, 0.7) inset;
+  color: #333;
+  display: inline-block;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0.3em;
+  white-space: nowrap;
+  text-align: center;
+  cursor: pointer;
+}
+
+sl-icon:active,
+#keyboard .key:active {
+  box-shadow: 0 2px 0 0 rgba(255, 255, 255, 0.7),
+    0 1px 1px rgba(0, 0, 0, 0.2) inset;
+}
+
+#code-input {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+#code-input pre {
+  min-width: 70vw;
+  border-bottom: 2px solid var(--sl-panel-border-color);
+  padding: 0.5em;
+  text-align: center;
+  font-size: 2.5em;
+  font-family: monospace;
+  letter-spacing: 0.5em;
+  min-height: 3em;
+  font-weight: var(--sl-font-weight-bold);
+}
+
+#code-input pre.complete {
+  color: var(--sl-color-success-600);
+}
+
+#code-input.hidden,
+#remote-keys.hidden {
+  display: none;
+}

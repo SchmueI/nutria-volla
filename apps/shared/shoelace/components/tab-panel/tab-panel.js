@@ -1,1 +1,15 @@
-import{a}from"../../chunks/chunk.JJACKGNN.js";import"../../chunks/chunk.BBBCCCKF.js";import"../../chunks/chunk.AR2QSYXF.js";import"../../chunks/chunk.RUACWBWF.js";import"../../chunks/chunk.SMFJUIOR.js";import"../../chunks/chunk.IKUI3UUK.js";import"../../chunks/chunk.H53HRVH4.js";import"../../chunks/chunk.SYBSOZNG.js";import"../../chunks/chunk.I4CX4JT3.js";export{a as default};
+import {
+  tab_panel_default
+} from "../../chunks/chunk.7S64EEJW.js";
+import "../../chunks/chunk.PO3FKNES.js";
+import "../../chunks/chunk.5HFAXYOW.js";
+import "../../chunks/chunk.DOYC4G7X.js";
+import "../../chunks/chunk.JJNPZ52S.js";
+import "../../chunks/chunk.XAOA43RZ.js";
+import "../../chunks/chunk.URBIOJXY.js";
+import "../../chunks/chunk.M2U2QT2K.js";
+import "../../chunks/chunk.27ILGUWR.js";
+import "../../chunks/chunk.YZETUBD6.js";
+export {
+  tab_panel_default as default
+};

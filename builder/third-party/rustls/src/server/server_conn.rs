@@ -1,6 +1,7 @@
 use crate::builder::{ConfigBuilder, WantsCipherSuites};
 use crate::common_state::{CommonState, Context, Side, State};
 use crate::conn::{ConnectionCommon, ConnectionCore};
+use crate::dns_name::DnsName;
 use crate::enums::{CipherSuite, ProtocolVersion, SignatureScheme};
 use crate::error::Error;
 use crate::kx::SupportedKxGroup;
@@ -107,7 +108,7 @@ pub trait ResolvesServerCert: Send + Sync {
 
 /// A struct representing the received Client Hello
 pub struct ClientHello<'a> {
-    server_name: &'a Option<webpki::DnsName>,
+    server_name: &'a Option<DnsName>,
     signature_schemes: &'a [SignatureScheme],
     alpn: Option<&'a Vec<ProtocolName>>,
     cipher_suites: &'a [CipherSuite],
@@ -116,7 +117,7 @@ pub struct ClientHello<'a> {
 impl<'a> ClientHello<'a> {
     /// Creates a new ClientHello
     pub(super) fn new(
-        server_name: &'a Option<webpki::DnsName>,
+        server_name: &'a Option<DnsName>,
         signature_schemes: &'a [SignatureScheme],
         alpn: Option<&'a Vec<ProtocolName>>,
         cipher_suites: &'a [CipherSuite],
@@ -140,7 +141,7 @@ impl<'a> ClientHello<'a> {
     pub fn server_name(&self) -> Option<&str> {
         self.server_name
             .as_ref()
-            .map(<webpki::DnsName as AsRef<str>>::as_ref)
+            .map(<DnsName as AsRef<str>>::as_ref)
     }
 
     /// Get the compatible signature schemes.
@@ -183,8 +184,9 @@ impl<'a> ClientHello<'a> {
 
 /// Common configuration for a set of server sessions.
 ///
-/// Making one of these can be expensive, and should be
-/// once per process rather than once per connection.
+/// Making one of these is cheap, though one of the inputs may be expensive: gathering trust roots
+/// from the operating system to add to the [`RootCertStore`] passed to a `ClientCertVerifier`
+/// builder may take on the order of a few hundred milliseconds.
 ///
 /// These must be created via the [`ServerConfig::builder()`] function.
 ///
@@ -195,6 +197,8 @@ impl<'a> ClientHello<'a> {
 /// * [`ServerConfig::alpn_protocols`]: the default is empty -- no ALPN protocol is negotiated.
 /// * [`ServerConfig::key_log`]: key material is not logged.
 /// * [`ServerConfig::send_tls13_tickets`]: 4 tickets are sent.
+///
+/// [`RootCertStore`]: crate::RootCertStore
 #[derive(Clone)]
 pub struct ServerConfig {
     /// List of ciphersuites, in preference order.
@@ -317,7 +321,7 @@ impl ServerConfig {
     pub fn builder() -> ConfigBuilder<Self, WantsCipherSuites> {
         ConfigBuilder {
             state: WantsCipherSuites(()),
-            side: PhantomData::default(),
+            side: PhantomData,
         }
     }
 
@@ -528,7 +532,7 @@ impl From<ServerConnection> for crate::Connection {
 ///     // Proceed with handling the ServerConnection.
 /// }
 /// # }
-//// ```
+/// ```
 pub struct Acceptor {
     inner: Option<ConnectionCommon<ServerConnectionData>>,
 }
@@ -789,7 +793,7 @@ impl ConnectionCore<ServerConnectionData> {
 /// State associated with a server connection.
 #[derive(Default)]
 pub struct ServerConnectionData {
-    pub(super) sni: Option<webpki::DnsName>,
+    pub(super) sni: Option<DnsName>,
     pub(super) received_resumption_data: Option<Vec<u8>>,
     pub(super) resumption_data: Vec<u8>,
     pub(super) early_data: EarlyDataState,

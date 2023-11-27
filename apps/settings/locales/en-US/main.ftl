@@ -39,6 +39,7 @@ privacy-title = Privacy
 privacy-geolocation-enabled = Enable Geolocation
 privacy-tor-enabled = Enable Tor
 privacy-tp-enabled = Enable Tracking Protection
+privacy-gpc-enabled = Enable Global Privacy Control
 
 # Display preferences panel
 display-title = Display Preferences
@@ -55,6 +56,7 @@ search-error-no-enabled = Please enable at least one search engine!
 # WebExt panel
 webext-title = Web Extensions
 webext-get-more = Get More Web Extensions
+webext-none-installed = No Web Extensions Installed Yet
 
 # Identity panel
 identity-title = Identity

@@ -56,11 +56,11 @@ multiline basic string
 """"#
     )
     .is_str());
-    assert!(parse_value!(r#"'literal string\ \'"#).is_str());
+    assert!(parse_value!(r"'literal string\ \'").is_str());
     assert!(parse_value!(
-        r#"'''multiline
+        r"'''multiline
 literal \ \
-string'''"#
+string'''"
     )
     .is_str());
     assert!(parse_value!(r#"{ hello = "world", a = 1}"#).is_inline_table());
@@ -1474,4 +1474,17 @@ p.a=4
     let document = input.parse::<Document>().unwrap();
     let actual = document.to_string();
     assert_eq(input, actual);
+}
+
+#[test]
+fn despan_keys() {
+    let mut doc = r#"aaaaaa = 1"#.parse::<Document>().unwrap();
+    let key = "bbb".parse::<Key>().unwrap();
+    let table = doc.as_table_mut();
+    table.insert_formatted(
+        &key,
+        toml_edit::Item::Value(Value::Integer(toml_edit::Formatted::new(2))),
+    );
+
+    assert_eq!(doc.to_string(), "aaaaaa = 1\nbbb = 2\n");
 }

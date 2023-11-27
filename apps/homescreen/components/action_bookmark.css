@@ -18,7 +18,7 @@
   width: 100%;
   font-size: smaller;
   text-decoration: none;
-  color: white;
+  color: env(theme-wallpaper-accent);
   text-shadow: black 1px 1px;
 }
 
@@ -27,6 +27,12 @@
   height: calc(var(--action-box-width) - 1.75em);
   border-radius: 40%;
   box-shadow: 2px 2px 3px black;
+}
+
+:host(.small) img {
+  width: 1.5em;
+  height: 1.5em;
+  border-radius: 40%;
 }
 
 :host img.animate {

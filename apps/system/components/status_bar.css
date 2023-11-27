@@ -1,11 +1,12 @@
 /* <system-statusbar> styling */
 
 :host {
-  /* background-color: rgba(255, 255, 255, 0.15); */
-  color: var(--status-text-normal);
+  color: env(theme-wallpaper-vibrant);
   font-size: 1rem;
   height: var(--statusbar-height);
   transition: background-color 0.25s;
+  --pb-color: #8000d7;
+  --pb-background: rgb(37, 0, 62);
 }
 
 :host .homescreen.session-desktop .left > * {
@@ -17,11 +18,16 @@
 }
 
 :host(.high-luminance) {
-  color: var(--status-text-highlum);
+  color: env(theme-wallpaper-muted);
 }
 
 :host(.transparent) {
-  color: lightgray;
+  color: env(theme-wallpaper-accent);
+}
+
+:host(.privatebrowsing) {
+  color: var(--pb-color);
+  background-color: var(--pb-background);
 }
 
 :host .container {
@@ -62,7 +68,7 @@ sl-icon {
 }
 
 .container.carousel {
-  backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: var(--carousel-backdrop);
 }
 
 .center {
@@ -70,6 +76,10 @@ sl-icon {
   align-items: center;
   justify-content: space-around;
   grid-gap: 0.25em;
+}
+
+.container.carousel .center {
+  visibility: hidden;
 }
 
 .left {
@@ -125,7 +135,7 @@ sl-badge::part(base) {
 sl-badge[variant="neutral"]::part(base) {
   background-color: transparent;
   border-color: transparent;
-  color: var(--status-text-normal);
+  color: env(theme-wallpaper-vibrant);
 }
 
 sl-badge[variant="primary"]::part(base) {
@@ -133,12 +143,23 @@ sl-badge[variant="primary"]::part(base) {
   border-color: transparent;
 }
 
-:host(.high-luminance) sl-badge[variant="neutral"]::part(base) {
-  color: var(--status-text-highlum);
+:host(.high-luminance) sl-badge[variant="neutral"]::part(base),
+:host(.high-luminance) sl-badge[variant="primary"]::part(base) {
+  color: env(theme-wallpaper-muted);
 }
 
-:host(.transparent) sl-badge[variant="neutral"]::part(base) {
-  color: lightgray;
+:host(.transparent) sl-badge[variant="neutral"]::part(base),
+:host(.transparent) sl-badge[variant="primary"]::part(base) {
+  color: env(theme-wallpaper-accent);
+}
+
+:host(.privatebrowsing) sl-badge[variant="neutral"]::part(base),
+:host(.privatebrowsing) sl-badge[variant="primary"]::part(base) {
+  color: var(--pb-color);
+}
+
+:host(.privatebrowsing) .favicon {
+  color: var(--pb-color);
 }
 
 .go-back.disabled {
@@ -173,17 +194,36 @@ sl-badge[variant="primary"]::part(base) {
   scrollbar-width: none;
   border-left: 1px solid currentColor;
   max-width: 40vw;
+  gap: 0.25em;
+  padding-left: 0.25em;
 }
 
-.frame-list img {
+.frame-list div {
   cursor: pointer;
   padding-left: 0.25em;
   padding-right: 0.25em;
   scroll-snap-align: start;
+  border: 1px solid transparent;
+  display: flex;
+  align-items: center;
+  gap: 0.2em;
 }
 
-.frame-list img.active {
-  opacity: 0.1;
+.frame-list div.active {
+  border: 1px solid currentColor;
+  border-radius: 5px;
+}
+
+.frame-list div sl-icon {
+  background-color: env(theme-wallpaper-muted);
+  color: env(theme-wallpaper-accent);
+  padding: 0.1em;
+  border-radius: 40%;
+  font-size: 1em;
+}
+
+.frame-list div .favicon {
+  margin-left: 0;
 }
 
 .container.homescreen .frame-list .favicon {

@@ -1,16 +1,20 @@
 // Helper class to manage the Fork dialog
 
 class ForkDialog {
-  constructor() {
+  constructor(mode = "fork") {
+    document.getElementById(
+      "fork-chooser-title"
+    ).dataset.l10nId = `fork-dialog-title-${mode}`;
     this.dialog = document.getElementById("fork-chooser");
     this.dialog.addEventListener("sl-after-hide", this);
-    document
-      .getElementById("fork-chooser-fork")
-      .addEventListener("click", this);
+    let okButton = document.getElementById("fork-chooser-ok");
+    okButton.dataset.l10nId = `btn-${mode}`;
+    okButton.addEventListener("click", this, { once: true });
     document
       .getElementById("fork-chooser-cancel")
-      .addEventListener("click", this);
+      .addEventListener("click", this, { once: true });
     this.promise = null;
+    this.mode = mode;
 
     this.dialog
       .querySelector("sl-dropdown")
@@ -27,7 +31,7 @@ class ForkDialog {
     if (event.type === "sl-after-hide") {
       // sl-after-hide is also dispatched when "closing" the sl-select drop down,
       // but we should not do anything in that case.
-      if (event.target !== this) {
+      if (event.target !== this.dialog) {
         return;
       }
 
@@ -37,7 +41,7 @@ class ForkDialog {
     }
 
     let id = event.target.getAttribute("id");
-    if (id === "fork-chooser-fork") {
+    if (id === "fork-chooser-ok") {
       let input = this.dialog.querySelector("#fork-url").value.trim();
       let result = input || this.dialog.querySelector("#fork-list").value;
       if (!result.endsWith("/manifest.webmanifest")) {
@@ -98,34 +102,39 @@ class ForkDialog {
 
       await graph.waitForDeps("apps manager");
 
-      let apps = await appsManager.getAll();
       let list = this.dialog.querySelector("#fork-list");
       list.innerHTML = "";
 
-      let subtitle = document.createElement("small")
-      subtitle.dataset.l10nId = "fork-chooser-your-library";
-      list.append(subtitle);
+      let subtitle = document.createElement("small");
 
-      for (let app of apps) {
-        let summary = await appsManager.getSummary(app);
-        const isTile = summary.url?.startsWith("tile://");
-        if (isTile) {
-          let option = document.createElement("sl-option");
-          option.value = summary.updateUrl;
-          let icon = document.createElement("img");
-          icon.src = summary.icon;
-          icon.setAttribute("slot", "prefix");
-          let desc = document.createElement("span");
-          desc.textContent = summary.description;
-          option.append(icon);
-          option.append(desc);
+      // Show installed tiles when forking, but not when installing.
+      if (this.mode === "fork") {
+        subtitle.dataset.l10nId = "fork-chooser-your-library";
+        let apps = await appsManager.getAll();
+        list.append(subtitle);
 
-          list.append(option);
+        for (let app of apps) {
+          let summary = await appsManager.getSummary(app);
+          const isTile = summary.url?.startsWith("tile://");
+          if (isTile) {
+            let option = document.createElement("sl-option");
+            option.value = summary.updateUrl;
+            let icon = document.createElement("img");
+            icon.src = summary.icon;
+            icon.setAttribute("slot", "prefix");
+            let desc = document.createElement("span");
+            desc.textContent = summary.description;
+            option.append(icon);
+            option.append(desc);
+
+            list.append(option);
+          }
         }
+
+        list.append(document.createElement("sl-divider"));
+        subtitle = document.createElement("small");
       }
 
-      list.append(document.createElement("sl-divider"));
-      subtitle = document.createElement("small")
       subtitle.dataset.l10nId = "fork-chooser-public-library";
       list.append(subtitle);
 

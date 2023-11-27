@@ -1,4 +1,4 @@
-content-window.not-homescreen {
+content-window:not(.homescreen) {
   background-color: white;
 }
 
@@ -37,6 +37,14 @@ content-window .inline-activity {
   justify-content: center;
   align-items: center;
   padding: 1em;
+}
+
+content-window .loader.privatebrowsing {
+  --pb-color: #8000d7;
+  --pb-background: rgb(37, 0, 62);
+
+  color: var(--pb-color);
+  background-color: var(--pb-background);
 }
 
 content-window .inline-activity {
@@ -216,4 +224,43 @@ content-window > .container .permissions .items div {
   display: flex;
   align-items: center;
   gap: 0.5em;
+}
+
+content-window > .container .permissions #permission-remember {
+  margin-top: 1em;
+}
+
+content-window.loading > .container::after {
+  height: 6px;
+  border-radius: 3px;
+  pointer-events: none;
+  content: "";
+  display: block;
+  position: absolute;
+  bottom: 0;
+  width: 50%;
+  left: 25%;
+  background-image: linear-gradient(
+    to left,
+    env(theme-wallpaper-muted),
+    env(theme-wallpaper-accent),
+    env(theme-wallpaper-muted)
+  );
+  animation: indeterminate-bar 1s ease-in-out infinite alternate;
+}
+
+@keyframes indeterminate-bar {
+  0% {
+    transform: translate(-50%);
+    opacity: 0.25;
+  }
+
+  50% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translate(50%);
+    opacity: 0.25;
+  }
 }

@@ -2,10 +2,10 @@
 //
 // powerpc64 on pwr8+ support 128-bit atomics:
 // https://github.com/llvm/llvm-project/commit/549e118e93c666914a1045fde38a2cac33e1e445
-// https://github.com/llvm/llvm-project/blob/llvmorg-16.0.0/llvm/test/CodeGen/PowerPC/atomics-i128-ldst.ll
-// https://github.com/llvm/llvm-project/blob/llvmorg-16.0.0/llvm/test/CodeGen/PowerPC/atomics-i128.ll
+// https://github.com/llvm/llvm-project/blob/llvmorg-17.0.0-rc2/llvm/test/CodeGen/PowerPC/atomics-i128-ldst.ll
+// https://github.com/llvm/llvm-project/blob/llvmorg-17.0.0-rc2/llvm/test/CodeGen/PowerPC/atomics-i128.ll
 //
-// powerpc64le is pwr8+ by default https://github.com/llvm/llvm-project/blob/llvmorg-16.0.0/llvm/lib/Target/PowerPC/PPC.td#L663
+// powerpc64le is pwr8+ by default https://github.com/llvm/llvm-project/blob/llvmorg-17.0.0-rc2/llvm/lib/Target/PowerPC/PPC.td#L663
 // See also https://github.com/rust-lang/rust/issues/59932
 //
 // Note that we do not separate LL and SC into separate functions, but handle
@@ -22,8 +22,8 @@
 // - atomic-maybe-uninit https://github.com/taiki-e/atomic-maybe-uninit
 //
 // Generated asm:
-// - powerpc64 (pwr8) https://godbolt.org/z/c6ao6oe83
-// - powerpc64le https://godbolt.org/z/z3er5MMv9
+// - powerpc64 (pwr8) https://godbolt.org/z/sj9ao7qKd
+// - powerpc64le https://godbolt.org/z/hY7Wdf6aT
 
 include!("macros.rs");
 
@@ -50,16 +50,19 @@ mod fallback;
         target_os = "linux",
         any(
             target_env = "gnu",
-            all(target_env = "musl", not(target_feature = "crt-static")),
+            all(any(target_env = "musl", target_env = "ohos"), not(target_feature = "crt-static")),
             portable_atomic_outline_atomics,
         ),
     ),
+    target_os = "android",
     target_os = "freebsd",
 ))]
-#[path = "detect/powerpc64_auxv.rs"]
+#[path = "detect/auxv.rs"]
 mod detect;
 
 use core::{arch::asm, sync::atomic::Ordering};
+
+use crate::utils::{Pair, U128};
 
 macro_rules! debug_assert_pwr8 {
     () => {
@@ -125,26 +128,6 @@ macro_rules! end_pwr8 {
     () => {
         ""
     };
-}
-
-/// A 128-bit value represented as a pair of 64-bit values.
-///
-/// This type is `#[repr(C)]`, both fields have the same in-memory representation
-/// and are plain old datatypes, so access to the fields is always safe.
-#[derive(Clone, Copy)]
-#[repr(C)]
-union U128 {
-    whole: u128,
-    pair: Pair,
-}
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct Pair {
-    #[cfg(target_endian = "big")]
-    hi: u64,
-    lo: u64,
-    #[cfg(target_endian = "little")]
-    hi: u64,
 }
 
 macro_rules! atomic_rmw {
@@ -240,9 +223,9 @@ unsafe fn atomic_load_pwr8(src: *mut u128, order: Ordering) -> u128 {
                     "2:",
                     "isync",
                     end_pwr8!(),
-                    src = in(reg_nonzero) src,
+                    src = in(reg_nonzero) ptr_reg!(src),
                     // Quadword atomic instructions work with even/odd pair of specified register and subsequent register.
-                    // We cannot use r1 and r2, so starting with r4.
+                    // We cannot use r1 (sp) and r2 (system reserved), so start with r4 or grater.
                     out("r4") out_hi,
                     out("r5") out_lo,
                     out("cr7") _,
@@ -256,9 +239,9 @@ unsafe fn atomic_load_pwr8(src: *mut u128, order: Ordering) -> u128 {
                     start_pwr8!(),
                     "lq %r4, 0({src})",
                     end_pwr8!(),
-                    src = in(reg_nonzero) src,
+                    src = in(reg_nonzero) ptr_reg!(src),
                     // Quadword atomic instructions work with even/odd pair of specified register and subsequent register.
-                    // We cannot use r1 and r2, so starting with r4.
+                    // We cannot use r1 (sp) and r2 (system reserved), so start with r4 or grater.
                     out("r4") out_hi,
                     out("r5") out_lo,
                     options(nostack, preserves_flags, readonly),
@@ -346,9 +329,9 @@ unsafe fn atomic_store_pwr8(dst: *mut u128, val: u128, order: Ordering) {
                     $release,
                     "stq %r4, 0({dst})",
                     end_pwr8!(),
-                    dst = in(reg_nonzero) dst,
+                    dst = in(reg_nonzero) ptr_reg!(dst),
                     // Quadword atomic instructions work with even/odd pair of specified register and subsequent register.
-                    // We cannot use r1 and r2, so starting with r4.
+                    // We cannot use r1 (sp) and r2 (system reserved), so start with r4 or grater.
                     in("r4") val.pair.hi,
                     in("r5") val.pair.lo,
                     options(nostack, preserves_flags),
@@ -405,7 +388,7 @@ unsafe fn atomic_compare_exchange_pwr8(
     // SAFETY: the caller must uphold the safety contract.
     //
     // Refs: "4.6.2.2 128-bit Load And Reserve and Store Conditional Instructions" of Power ISA
-    let res = unsafe {
+    let prev = unsafe {
         let old = U128 { whole: old };
         let new = U128 { whole: new };
         let (mut prev_hi, mut prev_lo);
@@ -419,19 +402,19 @@ unsafe fn atomic_compare_exchange_pwr8(
                         "xor {tmp_lo}, %r9, {old_lo}",
                         "xor {tmp_hi}, %r8, {old_hi}",
                         "or. {tmp_lo}, {tmp_lo}, {tmp_hi}",
-                        "bne %cr0, 3f",
+                        "bne %cr0, 3f", // jump if compare failed
                         "stqcx. %r6, 0, {dst}",
-                        "bne %cr0, 2b",
+                        "bne %cr0, 2b", // continue loop if store failed
                     "3:",
                     $acquire,
                     end_pwr8!(),
-                    dst = in(reg_nonzero) dst,
+                    dst = in(reg_nonzero) ptr_reg!(dst),
                     old_hi = in(reg_nonzero) old.pair.hi,
                     old_lo = in(reg_nonzero) old.pair.lo,
                     tmp_hi = out(reg_nonzero) _,
                     tmp_lo = out(reg_nonzero) _,
                     // Quadword atomic instructions work with even/odd pair of specified register and subsequent register.
-                    // We cannot use r1 and r2, so starting with r4.
+                    // We cannot use r1 (sp) and r2 (system reserved), so start with r4 or grater.
                     in("r6") new.pair.hi,
                     in("r7") new.pair.lo,
                     out("r8") prev_hi,
@@ -444,10 +427,10 @@ unsafe fn atomic_compare_exchange_pwr8(
         atomic_rmw!(cmpxchg, order);
         U128 { pair: Pair { hi: prev_hi, lo: prev_lo } }.whole
     };
-    (res, res == old)
+    (prev, prev == old)
 }
 
-// LLVM appears to generate strong CAS for powerpc64 128-bit weak CAS,
+// TODO: LLVM appears to generate strong CAS for powerpc64 128-bit weak CAS,
 // so we always use strong CAS for now.
 use atomic_compare_exchange as atomic_compare_exchange_weak;
 
@@ -477,9 +460,9 @@ unsafe fn atomic_swap_pwr8(dst: *mut u128, val: u128, order: Ordering) -> u128 {
                         "bne %cr0, 2b",
                     $acquire,
                     end_pwr8!(),
-                    dst = in(reg_nonzero) dst,
+                    dst = in(reg_nonzero) ptr_reg!(dst),
                     // Quadword atomic instructions work with even/odd pair of specified register and subsequent register.
-                    // We cannot use r1 and r2, so starting with r4.
+                    // We cannot use r1 (sp) and r2 (system reserved), so start with r4 or grater.
                     out("r6") prev_hi,
                     out("r7") prev_lo,
                     in("r8") val.pair.hi,
@@ -528,12 +511,12 @@ macro_rules! atomic_rmw_ll_sc_3 {
                                 "bne %cr0, 2b",
                             $acquire,
                             end_pwr8!(),
-                            dst = in(reg_nonzero) dst,
+                            dst = in(reg_nonzero) ptr_reg!(dst),
                             val_hi = in(reg_nonzero) val.pair.hi,
                             val_lo = in(reg_nonzero) val.pair.lo,
                             $($reg)*
                             // Quadword atomic instructions work with even/odd pair of specified register and subsequent register.
-                            // We cannot use r1 and r2, so starting with r4.
+                            // We cannot use r1 (sp) and r2 (system reserved), so start with r4 or grater.
                             out("r6") prev_hi,
                             out("r7") prev_lo,
                             out("r8") _, // new (hi)
@@ -581,10 +564,10 @@ macro_rules! atomic_rmw_ll_sc_2 {
                                 "bne %cr0, 2b",
                             $acquire,
                             end_pwr8!(),
-                            dst = in(reg_nonzero) dst,
+                            dst = in(reg_nonzero) ptr_reg!(dst),
                             $($reg)*
                             // Quadword atomic instructions work with even/odd pair of specified register and subsequent register.
-                            // We cannot use r1 and r2, so starting with r4.
+                            // We cannot use r1 (sp) and r2 (system reserved), so start with r4 or grater.
                             out("r6") prev_hi,
                             out("r7") prev_lo,
                             out("r8") _, // new (hi)
@@ -678,7 +661,7 @@ use atomic_not_pwr8 as atomic_not;
 #[inline]
 unsafe fn atomic_not_pwr8(dst: *mut u128, order: Ordering) -> u128 {
     // SAFETY: the caller must uphold the safety contract.
-    unsafe { atomic_xor_pwr8(dst, core::u128::MAX, order) }
+    unsafe { atomic_xor_pwr8(dst, u128::MAX, order) }
 }
 
 #[cfg(portable_atomic_llvm_16)]

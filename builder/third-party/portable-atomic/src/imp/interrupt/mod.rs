@@ -26,8 +26,8 @@
 //
 // See also README.md of this directory.
 //
-// [^avr1]: https://github.com/llvm/llvm-project/blob/llvmorg-16.0.0/llvm/lib/Target/AVR/AVRExpandPseudoInsts.cpp#LL963
-// [^avr2]: https://github.com/llvm/llvm-project/blob/llvmorg-16.0.0/llvm/test/CodeGen/AVR/atomics/load16.ll#L5
+// [^avr1]: https://github.com/llvm/llvm-project/blob/llvmorg-17.0.0-rc2/llvm/lib/Target/AVR/AVRExpandPseudoInsts.cpp#L1074
+// [^avr2]: https://github.com/llvm/llvm-project/blob/llvmorg-17.0.0-rc2/llvm/test/CodeGen/AVR/atomics/load16.ll#L5
 
 // On some platforms, atomic load/store can be implemented in a more efficient
 // way than disabling interrupts. On MSP430, some RMWs that do not return the
@@ -98,184 +98,6 @@ where
     unsafe { arch::restore(state) }
 
     r
-}
-
-#[repr(C, align(1))]
-pub(crate) struct AtomicBool {
-    v: UnsafeCell<u8>,
-}
-
-// Send is implicitly implemented.
-// SAFETY: any data races are prevented by disabling interrupts or
-// atomic intrinsics (see module-level comments).
-unsafe impl Sync for AtomicBool {}
-
-impl AtomicBool {
-    #[inline]
-    pub(crate) const fn new(v: bool) -> Self {
-        Self { v: UnsafeCell::new(v as u8) }
-    }
-
-    #[inline]
-    pub(crate) fn is_lock_free() -> bool {
-        Self::is_always_lock_free()
-    }
-    #[inline]
-    pub(crate) const fn is_always_lock_free() -> bool {
-        IS_ALWAYS_LOCK_FREE
-    }
-
-    #[inline]
-    pub(crate) fn get_mut(&mut self) -> &mut bool {
-        // SAFETY: the mutable reference guarantees unique ownership.
-        unsafe { &mut *(self.v.get() as *mut bool) }
-    }
-
-    #[inline]
-    pub(crate) fn into_inner(self) -> bool {
-        self.v.into_inner() != 0
-    }
-
-    #[inline]
-    #[cfg_attr(all(debug_assertions, not(portable_atomic_no_track_caller)), track_caller)]
-    pub(crate) fn load(&self, order: Ordering) -> bool {
-        crate::utils::assert_load_ordering(order);
-        #[cfg(not(any(target_arch = "avr", feature = "critical-section")))]
-        {
-            self.as_native().load(order)
-        }
-        #[cfg(any(target_arch = "avr", feature = "critical-section"))]
-        // SAFETY: any data races are prevented by disabling interrupts (see
-        // module-level comments) and the raw pointer is valid because we got it
-        // from a reference.
-        with(|| unsafe { self.v.get().read() != 0 })
-    }
-
-    #[inline]
-    #[cfg_attr(all(debug_assertions, not(portable_atomic_no_track_caller)), track_caller)]
-    pub(crate) fn store(&self, val: bool, order: Ordering) {
-        crate::utils::assert_store_ordering(order);
-        #[cfg(not(any(target_arch = "avr", feature = "critical-section")))]
-        {
-            self.as_native().store(val, order);
-        }
-        #[cfg(any(target_arch = "avr", feature = "critical-section"))]
-        // SAFETY: any data races are prevented by disabling interrupts (see
-        // module-level comments) and the raw pointer is valid because we got it
-        // from a reference.
-        with(|| unsafe { self.v.get().write(val as u8) });
-    }
-
-    #[inline]
-    pub(crate) fn swap(&self, val: bool, _order: Ordering) -> bool {
-        // SAFETY: any data races are prevented by disabling interrupts (see
-        // module-level comments) and the raw pointer is valid because we got it
-        // from a reference.
-        with(|| unsafe { self.v.get().replace(val as u8) != 0 })
-    }
-
-    #[inline]
-    #[cfg_attr(all(debug_assertions, not(portable_atomic_no_track_caller)), track_caller)]
-    pub(crate) fn compare_exchange(
-        &self,
-        current: bool,
-        new: bool,
-        success: Ordering,
-        failure: Ordering,
-    ) -> Result<bool, bool> {
-        crate::utils::assert_compare_exchange_ordering(success, failure);
-        // SAFETY: any data races are prevented by disabling interrupts (see
-        // module-level comments) and the raw pointer is valid because we got it
-        // from a reference.
-        with(|| unsafe {
-            let result = self.v.get().read();
-            if result == current as u8 {
-                self.v.get().write(new as u8);
-                Ok(result != 0)
-            } else {
-                Err(result != 0)
-            }
-        })
-    }
-
-    #[inline]
-    #[cfg_attr(all(debug_assertions, not(portable_atomic_no_track_caller)), track_caller)]
-    pub(crate) fn compare_exchange_weak(
-        &self,
-        current: bool,
-        new: bool,
-        success: Ordering,
-        failure: Ordering,
-    ) -> Result<bool, bool> {
-        self.compare_exchange(current, new, success, failure)
-    }
-
-    #[inline]
-    pub(crate) fn fetch_and(&self, val: bool, _order: Ordering) -> bool {
-        // SAFETY: any data races are prevented by disabling interrupts (see
-        // module-level comments) and the raw pointer is valid because we got it
-        // from a reference.
-        with(|| unsafe {
-            let result = self.v.get().read();
-            self.v.get().write(result & val as u8);
-            result != 0
-        })
-    }
-
-    #[inline]
-    pub(crate) fn fetch_or(&self, val: bool, _order: Ordering) -> bool {
-        // SAFETY: any data races are prevented by disabling interrupts (see
-        // module-level comments) and the raw pointer is valid because we got it
-        // from a reference.
-        with(|| unsafe {
-            let result = self.v.get().read();
-            self.v.get().write(result | val as u8);
-            result != 0
-        })
-    }
-
-    #[inline]
-    pub(crate) fn fetch_xor(&self, val: bool, _order: Ordering) -> bool {
-        // SAFETY: any data races are prevented by disabling interrupts (see
-        // module-level comments) and the raw pointer is valid because we got it
-        // from a reference.
-        with(|| unsafe {
-            let result = self.v.get().read();
-            self.v.get().write(result ^ val as u8);
-            result != 0
-        })
-    }
-
-    #[inline]
-    pub(crate) const fn as_ptr(&self) -> *mut bool {
-        self.v.get() as *mut bool
-    }
-
-    #[cfg(not(any(target_arch = "avr", feature = "critical-section")))]
-    #[inline]
-    fn as_native(&self) -> &atomic::AtomicBool {
-        // SAFETY: AtomicBool and atomic::AtomicBool have the same layout and
-        // guarantee atomicity in a compatible way. (see module-level comments)
-        unsafe { &*(self as *const Self as *const atomic::AtomicBool) }
-    }
-}
-
-#[cfg(not(all(target_arch = "msp430", not(feature = "critical-section"))))]
-impl_default_no_fetch_ops!(AtomicBool, bool);
-#[cfg(all(target_arch = "msp430", not(feature = "critical-section")))]
-impl AtomicBool {
-    #[inline]
-    pub(crate) fn and(&self, val: bool, order: Ordering) {
-        self.as_native().and(val, order);
-    }
-    #[inline]
-    pub(crate) fn or(&self, val: bool, order: Ordering) {
-        self.as_native().or(val, order);
-    }
-    #[inline]
-    pub(crate) fn xor(&self, val: bool, order: Ordering) {
-        self.as_native().xor(val, order);
-    }
 }
 
 #[cfg_attr(target_pointer_width = "16", repr(C, align(2)))]
@@ -372,12 +194,12 @@ impl<T> AtomicPtr<T> {
         // module-level comments) and the raw pointer is valid because we got it
         // from a reference.
         with(|| unsafe {
-            let result = self.p.get().read();
-            if result == current {
+            let prev = self.p.get().read();
+            if prev == current {
                 self.p.get().write(new);
-                Ok(result)
+                Ok(prev)
             } else {
-                Err(result)
+                Err(prev)
             }
         })
     }
@@ -590,12 +412,12 @@ macro_rules! atomic_int {
                 // module-level comments) and the raw pointer is valid because we got it
                 // from a reference.
                 with(|| unsafe {
-                    let result = self.v.get().read();
-                    if result == current {
+                    let prev = self.v.get().read();
+                    if prev == current {
                         self.v.get().write(new);
-                        Ok(result)
+                        Ok(prev)
                     } else {
-                        Err(result)
+                        Err(prev)
                     }
                 })
             }
@@ -618,9 +440,9 @@ macro_rules! atomic_int {
                 // module-level comments) and the raw pointer is valid because we got it
                 // from a reference.
                 with(|| unsafe {
-                    let result = self.v.get().read();
-                    self.v.get().write(result.wrapping_add(val));
-                    result
+                    let prev = self.v.get().read();
+                    self.v.get().write(prev.wrapping_add(val));
+                    prev
                 })
             }
 
@@ -630,9 +452,9 @@ macro_rules! atomic_int {
                 // module-level comments) and the raw pointer is valid because we got it
                 // from a reference.
                 with(|| unsafe {
-                    let result = self.v.get().read();
-                    self.v.get().write(result.wrapping_sub(val));
-                    result
+                    let prev = self.v.get().read();
+                    self.v.get().write(prev.wrapping_sub(val));
+                    prev
                 })
             }
 
@@ -642,9 +464,9 @@ macro_rules! atomic_int {
                 // module-level comments) and the raw pointer is valid because we got it
                 // from a reference.
                 with(|| unsafe {
-                    let result = self.v.get().read();
-                    self.v.get().write(result & val);
-                    result
+                    let prev = self.v.get().read();
+                    self.v.get().write(prev & val);
+                    prev
                 })
             }
 
@@ -654,9 +476,9 @@ macro_rules! atomic_int {
                 // module-level comments) and the raw pointer is valid because we got it
                 // from a reference.
                 with(|| unsafe {
-                    let result = self.v.get().read();
-                    self.v.get().write(!(result & val));
-                    result
+                    let prev = self.v.get().read();
+                    self.v.get().write(!(prev & val));
+                    prev
                 })
             }
 
@@ -666,9 +488,9 @@ macro_rules! atomic_int {
                 // module-level comments) and the raw pointer is valid because we got it
                 // from a reference.
                 with(|| unsafe {
-                    let result = self.v.get().read();
-                    self.v.get().write(result | val);
-                    result
+                    let prev = self.v.get().read();
+                    self.v.get().write(prev | val);
+                    prev
                 })
             }
 
@@ -678,9 +500,9 @@ macro_rules! atomic_int {
                 // module-level comments) and the raw pointer is valid because we got it
                 // from a reference.
                 with(|| unsafe {
-                    let result = self.v.get().read();
-                    self.v.get().write(result ^ val);
-                    result
+                    let prev = self.v.get().read();
+                    self.v.get().write(prev ^ val);
+                    prev
                 })
             }
 
@@ -690,9 +512,9 @@ macro_rules! atomic_int {
                 // module-level comments) and the raw pointer is valid because we got it
                 // from a reference.
                 with(|| unsafe {
-                    let result = self.v.get().read();
-                    self.v.get().write(core::cmp::max(result, val));
-                    result
+                    let prev = self.v.get().read();
+                    self.v.get().write(core::cmp::max(prev, val));
+                    prev
                 })
             }
 
@@ -702,9 +524,9 @@ macro_rules! atomic_int {
                 // module-level comments) and the raw pointer is valid because we got it
                 // from a reference.
                 with(|| unsafe {
-                    let result = self.v.get().read();
-                    self.v.get().write(core::cmp::min(result, val));
-                    result
+                    let prev = self.v.get().read();
+                    self.v.get().write(core::cmp::min(prev, val));
+                    prev
                 })
             }
 
@@ -714,9 +536,9 @@ macro_rules! atomic_int {
                 // module-level comments) and the raw pointer is valid because we got it
                 // from a reference.
                 with(|| unsafe {
-                    let result = self.v.get().read();
-                    self.v.get().write(!result);
-                    result
+                    let prev = self.v.get().read();
+                    self.v.get().write(!prev);
+                    prev
                 })
             }
 
@@ -726,9 +548,9 @@ macro_rules! atomic_int {
                 // module-level comments) and the raw pointer is valid because we got it
                 // from a reference.
                 with(|| unsafe {
-                    let result = self.v.get().read();
-                    self.v.get().write(result.wrapping_neg());
-                    result
+                    let prev = self.v.get().read();
+                    self.v.get().write(prev.wrapping_neg());
+                    prev
                 })
             }
             #[inline]
@@ -792,7 +614,6 @@ atomic_int!(load_store_critical_session, AtomicU128, u128, 16);
 mod tests {
     use super::*;
 
-    test_atomic_bool_single_thread!();
     test_atomic_ptr_single_thread!();
     test_atomic_int_single_thread!(i8);
     test_atomic_int_single_thread!(u8);

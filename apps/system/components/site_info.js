@@ -27,19 +27,23 @@ class SiteInfo extends HTMLElement {
         <span class="flex-fill"></span>
       </div>
       <div class="utils">
-        <sl-button variant="neutral" size="small" class="add-home hidden">
-          <img src="resources/pwalogo.svg" height="12px">
-          <span data-l10n-id="site-info-add-home"></span>
+        <sl-button variant="neutral" size="small" class="add-home hidden favorite">
+          <div>
+            <img src="resources/pwalogo.svg" height="12px">
+            <span></span>
+            <!-- inline copy of the "star" icon to be able to change the fill color -->
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          </div>
         </sl-button>
         <sl-button variant="neutral" size="small" class="split-screen" data-l10n-id="site-info-split-screen"></sl-button>
-        <sl-icon name="file-text" class="reader-mode hidden"></sl-icon>
         <span class="flex-fill"></span>
+        <sl-icon name="chevron-down" class="more-info"></sl-icon>
       </div>
-      <div class="utils">
+      <div class="utils additional-info">
         <img class="tosdr-img"/>
         <span class="flex-fill"></span>
       </div>
-      <div class="utils">
+      <div class="utils additional-info">
         <sl-select hoist size="small" class="ua-chooser">
           <span slot="label" data-l10n-id="site-info-choose-ua"></span>
           <sl-option value="b2g" data-l10n-id="site-info-b2g-ua"></sl-option>
@@ -48,10 +52,12 @@ class SiteInfo extends HTMLElement {
         </sl-select>
         <span class="flex-fill"></span>
       </div>
+      <sl-divider></sl-divider>
       <div class="utils">
         <sl-icon class="nav-reload" name="refresh-cw"></sl-icon>
         <sl-icon class="nav-back" name="chevron-left"></sl-icon>
         <sl-icon class="nav-forward" name="chevron-right"></sl-icon>
+        <sl-icon name="file-text" class="reader-mode hidden"></sl-icon>
         <span class="flex-fill"></span>
         <sl-icon class="share" name="share-2"></sl-icon>
         <sl-icon class="zoom-out" name="zoom-out"></sl-icon>
@@ -60,6 +66,8 @@ class SiteInfo extends HTMLElement {
       </div>
     </div>
     `;
+
+    this.classList.add("hide-additional-info");
 
     let l10nReady = document.l10n.translateFragment(shadow);
 
@@ -94,6 +102,16 @@ class SiteInfo extends HTMLElement {
 
     this.stateUpdater = this.updateState.bind(this);
     this.drawer = this.parentElement;
+
+    shadow.querySelector(".more-info").onclick = (event) => {
+      this.classList.toggle("hide-additional-info");
+      event.target.setAttribute(
+        "name",
+        this.classList.contains("hide-additional-info")
+          ? "chevron-down"
+          : "chevron-up"
+      );
+    };
   }
 
   close() {
@@ -116,7 +134,11 @@ class SiteInfo extends HTMLElement {
 
     // For now, consider all local packaged apps as safe.
     // tile:// pages are also safe because of their default CSP.
-    if (domain.endsWith(".localhost") || url.protocol === "tile:") {
+    if (
+      domain.endsWith(".localhost") ||
+      url.protocol === "tile:" ||
+      url.protocol === "about:"
+    ) {
       return;
     }
 
@@ -338,14 +360,19 @@ class SiteInfo extends HTMLElement {
     let button = this.inShadowRoot("sl-button.add-home");
     button.classList.remove("hidden");
     let pwaLogo = this.inShadowRoot("sl-button.add-home img");
+    let label = this.inShadowRoot("sl-button.add-home span");
     if (this.state.manifestUrl && this.state.manifestUrl !== "") {
       pwaLogo.classList.remove("hidden");
+      label.dataset.l10nId = "site-info-install-pwa";
     } else {
       pwaLogo.classList.add("hidden");
     }
+    this.updateFavorite(button, label).then(() => {
+      document.l10n.translateFragment(label);
+    });
     button.onclick = async (event) => {
       event.stopPropagation();
-      this.addToHome();
+      this.addToFavorites();
       this.close();
     };
 
@@ -357,32 +384,61 @@ class SiteInfo extends HTMLElement {
     this.drawer.show();
   }
 
-  async addToHome() {
-    let activityData = null;
+  async maybeAppForManifest(manifestUrl) {
+    let service = await window.apiDaemon.getAppsManager();
+    let app;
+    try {
+      // Check if the app is installed. getApp() expects the cached url, so instead
+      // we need to get all apps and check their update url...
+      let apps = await service.getAll();
+      app = apps.find((app) => {
+        return app.updateUrl == manifestUrl;
+      });
+    } catch (e) {}
+    return app;
+  }
 
+  async updateFavorite(node, label) {
+    let isFavorite = false;
+    // If we have a manifest URL, check if the app is already installed.
     if (this.state.manifestUrl && this.state.manifestUrl !== "") {
-      let service = await window.apiDaemon.getAppsManager();
-      let app;
-      try {
-        // Check if the app is installed. getApp() expects the cached url, so instead
-        // we need to get all apps and check their update url...
-        let apps = await service.getAll();
-        app = apps.find((app) => {
-          return app.updateUrl == this.state.manifestUrl;
-        });
-      } catch (e) {}
-      if (app) {
-        // The app is already installed, we won't re-install it but only
-        // add it to the homescreen.
-        activityData = { app };
+      isFavorite = !!(await this.maybeAppForManifest(this.state.manifestUrl));
+    } else if (URL.canParse(this.state.url)) {
+      // Otherwise check if the current URL has a 'favorite' tag.
+      let url = new URL(this.state.url);
+      url.hash = "";
+
+      let place = await contentManager.getPlace(url.href);
+
+      let tags = place.meta.tags || [];
+      isFavorite = tags.includes("favorite");
+      if (isFavorite) {
+        label.dataset.l10nId = "site-info-remove-favorite";
       } else {
+        label.dataset.l10nId = "site-info-add-favorite";
+      }
+    }
+
+    if (isFavorite) {
+      node.classList.add("favorite");
+    } else {
+      node.classList.remove("favorite");
+    }
+  }
+
+  async addToFavorites() {
+    // If we have a manifest URL, check if the app is already installed.
+    if (this.state.manifestUrl && this.state.manifestUrl !== "") {
+      let app = await this.maybeAppForManifest(this.state.manifestUrl);
+      if (!app) {
         // Install the new app.
         try {
+          let service = await window.apiDaemon.getAppsManager();
           let appObject = await service.installPwa(this.state.manifestUrl);
           let msg = await window.utils.l10n("success-add-to-home");
           window.toaster.show(msg, "success");
           console.log(
-            `SiteInfo: PWA installation success for this.state.manifestUrl: ${appObject}`
+            `SiteInfo: PWA installation success for ${this.state.manifestUrl}: ${appObject}`
           );
         } catch (e) {
           let msg = await window.utils.l10n("error-add-to-home");
@@ -391,15 +447,44 @@ class SiteInfo extends HTMLElement {
             `SiteInfo: Failed to install app: ${JSON.stringify(e)}`
           );
         }
-        // All done when installing a new app.
-        return;
       }
-    } else {
-      activityData = {
-        siteInfo: this.state,
-      };
-    }
+    } else if (URL.canParse(this.state.url)) {
+      // Add the favorite tag if needed.
+      let url = new URL(this.state.url);
+      url.hash = "";
 
+      let place = await contentManager.getPlace(url.href);
+      let tags = place.meta.tags || [];
+      if (!tags.includes("favorite")) {
+        await place.addTag("favorite");
+
+        let title = await window.utils.l10n("siteinfo-ask-add-to-home-title");
+        let text = await window.utils.l10n("siteinfo-ask-add-to-home-text");
+        let btnAdd = await window.utils.l10n("button-add");
+        let btnCancel = await window.utils.l10n("button-cancel");
+
+        let dialog = document.querySelector("confirm-dialog");
+        let result = await dialog.open({
+          title,
+          text,
+          buttons: [
+            { id: "add", label: btnAdd, variant: "primary" },
+            { id: "cancel", label: btnCancel },
+          ],
+          focused: "add",
+        });
+        if (result == "add") {
+          this.addToHome({
+            siteInfo: this.state,
+          });
+        }
+      } else {
+        await place.removeTag("favorite");
+      }
+    }
+  }
+
+  async addToHome(activityData) {
     console.log(
       `SiteInfo: about to call add-to-home activity for ${JSON.stringify(
         activityData

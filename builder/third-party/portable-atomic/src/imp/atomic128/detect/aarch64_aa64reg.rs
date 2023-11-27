@@ -47,7 +47,7 @@ fn _detect(info: &mut CpuInfo) {
     } = imp::aa64reg();
 
     // ID_AA64ISAR0_EL1, Instruction Set Attribute Register 0
-    // https://developer.arm.com/documentation/ddi0601/2023-03/AArch64-Registers/ID-AA64ISAR0-EL1--AArch64-Instruction-Set-Attribute-Register-0?lang=en
+    // https://developer.arm.com/documentation/ddi0601/2023-06/AArch64-Registers/ID-AA64ISAR0-EL1--AArch64-Instruction-Set-Attribute-Register-0?lang=en
     let atomic = extract(aa64isar0, 23, 20);
     if atomic >= 2 {
         info.set(CpuInfo::HAS_LSE);
@@ -63,12 +63,12 @@ fn _detect(info: &mut CpuInfo) {
     #[cfg(test)]
     {
         // ID_AA64ISAR1_EL1, Instruction Set Attribute Register 1
-        // https://developer.arm.com/documentation/ddi0601/2023-03/AArch64-Registers/ID-AA64ISAR1-EL1--AArch64-Instruction-Set-Attribute-Register-1?lang=en
+        // https://developer.arm.com/documentation/ddi0601/2023-06/AArch64-Registers/ID-AA64ISAR1-EL1--AArch64-Instruction-Set-Attribute-Register-1?lang=en
         if extract(aa64isar1, 23, 20) >= 3 {
             info.set(CpuInfo::HAS_RCPC3);
         }
         // ID_AA64MMFR2_EL1, AArch64 Memory Model Feature Register 2
-        // https://developer.arm.com/documentation/ddi0601/2023-03/AArch64-Registers/ID-AA64MMFR2-EL1--AArch64-Memory-Model-Feature-Register-2?lang=en
+        // https://developer.arm.com/documentation/ddi0601/2023-06/AArch64-Registers/ID-AA64MMFR2-EL1--AArch64-Memory-Model-Feature-Register-2?lang=en
         if extract(aa64mmfr2, 35, 32) >= 1 {
             info.set(CpuInfo::HAS_LSE2);
         }
@@ -95,7 +95,7 @@ mod imp {
         unsafe {
             let aa64isar0: u64;
             asm!(
-                "mrs {}, ID_AA64ISAR0_EL1",
+                "mrs {0}, ID_AA64ISAR0_EL1",
                 out(reg) aa64isar0,
                 options(pure, nomem, nostack, preserves_flags)
             );
@@ -104,7 +104,7 @@ mod imp {
             #[cfg(test)]
             {
                 asm!(
-                    "mrs {}, ID_AA64ISAR1_EL1",
+                    "mrs {0}, ID_AA64ISAR1_EL1",
                     out(reg) aa64isar1,
                     options(pure, nomem, nostack, preserves_flags)
                 );
@@ -114,7 +114,7 @@ mod imp {
             #[cfg(test)]
             {
                 asm!(
-                    "mrs {}, ID_AA64MMFR2_EL1",
+                    "mrs {0}, ID_AA64MMFR2_EL1",
                     out(reg) aa64mmfr2,
                     options(pure, nomem, nostack, preserves_flags)
                 );

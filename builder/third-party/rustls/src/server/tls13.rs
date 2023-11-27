@@ -235,6 +235,7 @@ mod client_hello {
                         emit_hello_retry_request(
                             &mut self.transcript,
                             self.suite,
+                            client_hello.session_id,
                             cx.common,
                             group.name,
                         );
@@ -280,6 +281,17 @@ mod client_hello {
                     return Err(cx.common.send_fatal_alert(
                         AlertDescription::IllegalParameter,
                         PeerMisbehaved::PskExtensionMustBeLast,
+                    ));
+                }
+
+                // "A client MUST provide a "psk_key_exchange_modes" extension if it
+                //  offers a "pre_shared_key" extension. If clients offer
+                //  "pre_shared_key" without a "psk_key_exchange_modes" extension,
+                //  servers MUST abort the handshake." - RFC8446 4.2.9
+                if client_hello.get_psk_modes().is_none() {
+                    return Err(cx.common.send_fatal_alert(
+                        AlertDescription::MissingExtension,
+                        PeerMisbehaved::MissingPskModesExtension,
                     ));
                 }
 
@@ -531,7 +543,7 @@ mod client_hello {
 
         // Do key exchange
         let key_schedule = kx.complete(&share.payload.0, |secret| {
-            Ok(key_schedule_pre_handshake.into_handshake(secret))
+            key_schedule_pre_handshake.into_handshake(secret)
         })?;
 
         let handshake_hash = transcript.get_current_hash();
@@ -559,12 +571,13 @@ mod client_hello {
     fn emit_hello_retry_request(
         transcript: &mut HandshakeHash,
         suite: &'static Tls13CipherSuite,
+        session_id: SessionId,
         common: &mut CommonState,
         group: NamedGroup,
     ) {
         let mut req = HelloRetryRequest {
             legacy_version: ProtocolVersion::TLSv1_2,
-            session_id: SessionId::empty(),
+            session_id,
             cipher_suite: suite.common.suite,
             extensions: Vec::new(),
         };
@@ -590,6 +603,7 @@ mod client_hello {
         common.send_msg(m, false);
     }
 
+    #[allow(clippy::needless_pass_by_ref_mut)] // cx only mutated if cfg(feature = "quic")
     fn decide_if_early_data_allowed(
         cx: &mut ServerContext<'_>,
         client_hello: &ClientHelloPayload,

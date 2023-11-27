@@ -9,7 +9,7 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  color: white;
+  color: env(theme-wallpaper-accent);
   background-size: cover;
   background-repeat: no-repeat;
   background-position: 50% 50%;
@@ -44,10 +44,12 @@
 :host sl-icon {
   padding: 0.5em;
   font-size: 1.5em;
+  border-radius: 40%;
 }
 
 :host sl-icon.active {
-  color: var(--icon-background-active);
+  color: env(theme-wallpaper-muted);
+  background-color: env(theme-wallpaper-accent);
 }
 
 .clock {
@@ -80,13 +82,17 @@
   width: 100%;
 }
 
-.slider-fill {
+:host .slider-fill {
   display: flex;
   flex-direction: column;
   justify-content: end;
   align-items: center;
   padding-bottom: 0.5em;
   animation: slideup-indicator 2s ease infinite 3s;
+}
+
+:host(.screen-off) .slider-fill {
+  animation: none;
 }
 
 @keyframes slideup-indicator {

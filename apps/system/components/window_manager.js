@@ -137,7 +137,7 @@ class WindowManagerKeys {
 
     // Open the url editor with [Ctrl] + [l]
     if (this.isCtrlDown && event.type === "keydown" && event.key === "l") {
-      let frame = wm.currentFrame();
+      let frame = this.wm.currentFrame();
       if (!frame?.config.isHomescreen) {
         actionsDispatcher.dispatch("open-url-editor", frame.state.url);
       }
@@ -151,8 +151,7 @@ class WindowManagerKeys {
       event.key === "t" &&
       !window.lockscreen.isLocked()
     ) {
-      this.wm.goHome();
-      window.XacHomescreen.newTab();
+      actionsDispatcher.dispatch("new-tab");
     }
 
     // Do a WebRender Capture with [Ctrl] + [Shift] + [w]
@@ -187,6 +186,128 @@ class WindowManagerKeys {
         this.wm.zoomResetCurrentFrame();
       }
     }
+
+    // Go back in history with [Alt] [<-] and
+    // go forward with [Alt] [->]
+    if (this.isAltDown && event.type === "keydown" && !this.isCarouselOpen) {
+      if (event.key === "ArrowLeft") {
+        this.wm.goBack();
+      } else if (event.key === "ArrowRight") {
+        this.wm.goForward();
+      }
+    }
+  }
+}
+
+class CaretManager {
+  constructor() {
+    this.caretSelection = document.getElementById("caret-selection");
+
+    embedder.addEventListener(
+      "caret-state-changed",
+      this.caretStateChanged.bind(this)
+    );
+    actionsDispatcher.addListener("lockscreen-locked", () => {
+      this.caretSelection.classList.add("hidden");
+    });
+
+    ["copy", "search", "select-all", "share"].forEach((name) => {
+      let elem = document.getElementById(`selection-${name}`);
+      elem.addEventListener("pointerdown", this, { capture: true });
+    });
+
+    this.selectedText = null;
+    this.previousTop = window.innerWidth / 2;
+    this.previousLeft = window.innerHeight / 2;
+    this.hideTimer = null;
+  }
+
+  handleEvent(event) {
+    let id = event.target.getAttribute("id");
+    switch (id) {
+      case "selection-copy":
+        embedder.doSelectionAction("copy");
+        break;
+      case "selection-select-all":
+        embedder.doSelectionAction("selectall");
+        break;
+      case "selection-share":
+        let act = new WebActivity("share", { text: this.selectedText });
+        act.start();
+        break;
+      case "selection-search":
+        window.utils.randomSearchEngineUrl(this.selectedText).then((url) => {
+          wm.openFrame(url, {
+            activate: true,
+            details: { search: this.selectedText },
+          });
+        });
+        break;
+      default:
+        return;
+    }
+    event.stopPropagation();
+    this.caretSelection.classList.add("hidden");
+  }
+
+  caretStateChanged(event) {
+    let { rect, commands, caretVisible, selectedTextContent } = event.detail;
+
+    if (caretVisible) {
+      if (this.hideTimer) {
+        clearTimeout(this.hideTimer);
+        this.hideTimer = null;
+      }
+
+      if (commands.canCopy) {
+        document.getElementById("selection-copy").classList.remove("hidden");
+      } else {
+        document.getElementById("selection-copy").classList.add("hidden");
+      }
+
+      if (commands.canSelectAll) {
+        document
+          .getElementById("selection-select-all")
+          .classList.remove("hidden");
+      } else {
+        document.getElementById("selection-select-all").classList.add("hidden");
+      }
+
+      this.selectedText = selectedTextContent;
+
+      let buttons = this.caretSelection.getBoundingClientRect();
+
+      let top =
+        buttons.height != 0 ? rect.top - buttons.height - 5 : this.previousTop;
+      if (top < 0) {
+        this.caretSelection.classList.add("hidden");
+        return;
+      }
+      this.caretSelection.style.top = `${top}px`;
+
+      // Try to center the buttons with the selection, but make
+      // sure it's fully on screen.
+      let left =
+        buttons.width != 0
+          ? rect.left + rect.width / 2 - buttons.width / 2
+          : this.previousLeft;
+      if (left < 5) {
+        left = 5;
+      }
+      if (left + buttons.width + 5 > window.innerWidth) {
+        left = window.innerWidth - buttons.width - 5;
+      }
+      this.caretSelection.style.left = `${left}px`;
+
+      this.previousTop = top;
+      this.previousLeft = left;
+
+      this.caretSelection.classList.remove("hidden");
+    } else {
+      this.hideTimer = setTimeout(() => {
+        this.caretSelection.classList.add("hidden");
+      }, 500);
+    }
   }
 }
 
@@ -195,6 +316,8 @@ class WindowManager extends HTMLElement {
     super();
     this.keys = new WindowManagerKeys(this);
     this.log(`constructor`);
+
+    this.caretManager = new CaretManager();
   }
 
   log(msg) {
@@ -310,6 +433,12 @@ class WindowManager extends HTMLElement {
       this.splitScreen();
     });
 
+    actionsDispatcher.addListener("new-tab", async () => {
+      this.goHome();
+      this.homescreenFrame().focus();
+      window.XacHomescreen.newTab();
+    });
+
     // This event is sent when calling WindowClient.focus() from a Service Worker.
     window.addEventListener("framefocusrequested", (event) => {
       // event.target is the xul:browser
@@ -336,6 +465,10 @@ class WindowManager extends HTMLElement {
 
   zoomResetCurrentFrame() {
     this.activeFrame && this.frames[this.activeFrame].zoomReset();
+  }
+
+  toggleMutedState(frameId) {
+    this.frames[frameId]?.toggleMutedState();
   }
 
   splitScreen() {
@@ -405,8 +538,14 @@ class WindowManager extends HTMLElement {
     // Close the webext action popup if it's open.
     document.querySelector("webext-browser-action").hide();
 
+    // If a frame was opened from the same url, switch to it.
     let startId = this.startedAt[url];
-    if (startId && this.frames[startId]) {
+    let reuse =
+      startId &&
+      this.frames[startId] &&
+      !!config.details?.privatebrowsing ==
+        this.frames[startId].state.privatebrowsing;
+    if (reuse) {
       if (this.isCarouselOpen) {
         actionsDispatcher.dispatch("close-carousel");
       }
@@ -433,6 +572,10 @@ class WindowManager extends HTMLElement {
     );
 
     config.startUrl = url;
+
+    if (config.remote === undefined) {
+      config.remote = true;
+    }
 
     // Activities can use the "fullscreen" disposition to launch
     // in fullscreen mode.
@@ -499,6 +642,15 @@ class WindowManager extends HTMLElement {
     return contentWindow.webView;
   }
 
+  // Specialized version of openFrame() tailored for about: pages.
+  openAbout(url) {
+    if (!url.startsWith("about:")) {
+      return;
+    }
+
+    this.openFrame(url, { remote: false, activate: true });
+  }
+
   handleEvent(event) {
     let contentWindow = event.target;
     while (contentWindow && contentWindow.localName !== "content-window") {
@@ -523,6 +675,10 @@ class WindowManager extends HTMLElement {
 
   currentFrame() {
     return this.activeFrame ? this.frames[this.activeFrame] : null;
+  }
+
+  currentWebExtensionTabId() {
+    return this.currentFrame()?.webView._extensionId;
   }
 
   goBack() {
@@ -602,7 +758,13 @@ class WindowManager extends HTMLElement {
       if (!frame.config.isHomescreen) {
         const { title, icon } = frame.state;
         let id = frame.getAttribute("id");
-        list.push({ id, title, icon });
+        list.push({
+          id,
+          title,
+          icon,
+          isPlayingAudio: frame.isPlayingAudio,
+          audioMuted: frame.audioMuted,
+        });
       }
       frame = frame.nextElementSibling;
     }
@@ -646,7 +808,7 @@ class WindowManager extends HTMLElement {
 
   forceFrameStateUpdate(id) {
     let frame = this.frames[id];
-    if (frame){
+    if (frame) {
       frame.dispatchStateUpdate(true);
     }
   }
@@ -711,58 +873,44 @@ class WindowManager extends HTMLElement {
     this.closeFrame(this.captivePortalId);
   }
 
-  openCarousel() {
+  async openCarousel() {
     if (this.isCarouselOpen) {
       return;
     }
 
-    // We don't put the homescreen in the carousel.
+    let verticalMode = embedder.sessionType === "mobile";
+
+    let updateCarouselAttr = (frameCount) => {
+      this.carousel.classList.remove("single-row");
+      this.carousel.classList.remove("two-rows");
+      this.carousel.classList.remove("single-column");
+      if (frameCount <= 2) {
+        this.carousel.classList.add("single-row");
+      } else if (frameCount <= 4) {
+        this.carousel.classList.add("two-rows");
+      }
+      if (frameCount <= 1) {
+        this.carousel.classList.add("single-column");
+      }
+    };
+
+    // We don't put the homescreen in the carousel but we add the new-tab
+    // card so the frame count is as if we added the homescreen.
     let frameCount = Object.keys(this.frames).length;
-
-    // No content open except the homescreen: just display a message.
-    if (frameCount == 1) {
-      this.carousel.setAttribute("style", "grid-template-column: 1fr");
-      this.carousel.innerHTML = `<div class="empty-carousel">
-                                   <img src="${window.config.brandLogo}" />
-                                   <div data-l10n-id="empty-carousel"></div>
-                                   <div class="learn-something" data-l10n-id="learn-something-text"></div>
-                                 </div>`;
-
-      // Hide the live content and show the carousel.
-      this.windows.classList.add("hidden");
-      this.carousel.classList.remove("hidden");
-      this.isCarouselOpen = true;
-
-      // Open a new frame when clicking on the "learn something" text.
-      // We can't use a <a href="..." target="_blank"> because Gecko prevents
-      // chrome documents from opening https:// ones.
-      this.carousel.querySelector(".learn-something").addEventListener(
-        "click",
-        async () => {
-          actionsDispatcher.dispatch("close-carousel");
-          let url = await window.utils.l10n("learn-something-url");
-          this.openFrame(url, { activate: true });
-        },
-        { once: true }
-      );
-
-      this.carousel.querySelector(".empty-carousel").addEventListener(
-        "click",
-        () => {
-          actionsDispatcher.dispatch("close-carousel");
-        },
-        { once: true }
-      );
-      return;
-    }
 
     // Keep the 75% vs 50% in sync with this rule in window_manager.css :
     // window-manager .carousel > div:not(.empty-carousel)
-    let screenshotSize = embedder.sessionType === "mobile" ? 75 : 50;
-    let marginSize = (100 - screenshotSize) / 2;
-    this.carousel.style.gridTemplateColumns = `${marginSize}% repeat(${
-      frameCount - 1
-    }, ${screenshotSize}%) ${marginSize}%`;
+    let screenshotPercent = embedder.sessionType === "mobile" ? 75 : 50;
+    let marginPercent = (100 - screenshotPercent) / 2;
+
+    if (verticalMode) {
+      this.carousel.classList.add("vertical");
+      updateCarouselAttr(frameCount);
+    } else {
+      this.carousel.style.gridTemplateColumns = `${marginPercent}% repeat(${frameCount}, ${screenshotPercent}%) ${marginPercent}%`;
+      this.carousel.classList.remove("vertical");
+    }
+
     // Add the elements to the carousel.
     this.carousel.innerHTML = "";
 
@@ -817,18 +965,24 @@ class WindowManager extends HTMLElement {
       });
     };
 
-    this.carouselObserver = new IntersectionObserver(
-      intersectionCallback,
-      options
-    );
+    if (!verticalMode) {
+      this.carouselObserver = new IntersectionObserver(
+        intersectionCallback,
+        options
+      );
+    }
 
     // Left padding div.
-    let padding = document.createElement("div");
-    padding.classList.add("padding");
-    this.carouselObserver.observe(padding);
-    this.carousel.appendChild(padding);
+    if (!verticalMode) {
+      let padding = document.createElement("div");
+      padding.classList.add("padding");
+      this.carouselObserver.observe(padding);
+      this.carousel.appendChild(padding);
+    }
 
     // Add screenshots for all windows except the homescreen.
+    let readyPromises = new Array();
+
     let index = 0;
     let selectedIndex = -1;
     let frame = this.windows.firstElementChild;
@@ -839,37 +993,36 @@ class WindowManager extends HTMLElement {
       }
 
       let screenshot = document.createElement("div");
+      if (!verticalMode) {
+        screenshot.classList.add("sideline");
+      }
       let id = frame.getAttribute("id");
 
       if (id == this.activeFrame) {
         selectedIndex = index;
-        screenshot.classList.add("selected");
       }
 
-      let { current, next } = frame.getScreenshot();
-      if (current) {
-        screenshot.blobUrl = URL.createObjectURL(current);
-        screenshot.style.backgroundImage = `url(${screenshot.blobUrl})`;
-      }
-
-      next.then((blob) => {
-        // Optimistic heuristic: if blob are the exact same size, images should be the same.
-        // This is obviously not true in general, but good enough here to prevent most
-        // useless background updates.
-        if (blob.size === current?.size) {
+      let promise = new Promise((resolve) => {
+        frame.updateScreenshot().then((blob) => {
+          if (blob) {
+            if (screenshot.blobUrl) {
+              URL.revokeObjectURL(screenshot.blobUrl);
+            }
+            screenshot.blobUrl = URL.createObjectURL(blob);
+            screenshot.style.backgroundImage = `url(${screenshot.blobUrl})`;
+          }
           screenshot.classList.add("show");
-          return;
-        }
-        if (screenshot.blobUrl) {
-          URL.revokeObjectURL(screenshot.blobUrl);
-        }
-        screenshot.blobUrl = URL.createObjectURL(blob);
-        screenshot.style.backgroundImage = `url(${screenshot.blobUrl})`;
-        screenshot.classList.add("show");
+          resolve();
+        });
       });
+
+      readyPromises.push(promise);
 
       screenshot.setAttribute("frame", id);
       screenshot.setAttribute("id", `carousel-screenshot-${index}`);
+      if (frame.state.privatebrowsing) {
+        screenshot.classList.add("privatebrowsing");
+      }
       index += 1;
       screenshot.classList.add("screenshot");
       screenshot.innerHTML = `
@@ -878,10 +1031,32 @@ class WindowManager extends HTMLElement {
           frame.state.icon || window.config.brandLogo
         }" />
         <div class="flex-fill"></div>
-        <div class="close-icon">
-          <sl-icon name="x"></sl-icon>
-        </div>
+        <footer>
+          <div class="close-icon">
+            <sl-icon name="x"></sl-icon>
+          </div>
+          <div class="audio-play">
+            <sl-icon name="volume-1"></sl-icon>
+          </div>
+        </footer>
       </div>`;
+      let audioPlay = screenshot.querySelector(".audio-play");
+      if (frame.isPlayingAudio) {
+        let audioIcon = audioPlay.firstElementChild;
+        audioIcon.setAttribute(
+          "name",
+          frame.audioMuted ? "volume-x" : "volume-1"
+        );
+        let playingFrame = frame;
+        audioPlay.onclick = (event) => {
+          event.stopPropagation();
+          // Toggle the muted state.
+          let muted = playingFrame.toggleMutedState();
+          audioIcon.setAttribute("name", muted ? "volume-x" : "volume-1");
+        };
+      } else {
+        audioPlay.remove();
+      }
       screenshot.querySelector(".close-icon").addEventListener(
         "click",
         (event) => {
@@ -891,16 +1066,18 @@ class WindowManager extends HTMLElement {
           screenshot.ontransitionend = screenshot.ontransitioncancel = () => {
             screenshot.remove();
             this.closeFrame(id);
-            // Update the grid columns definitions.
             let frameCount = Object.keys(this.frames).length;
-            if (frameCount > 1) {
-              this.carousel.style.gridTemplateColumns = `${marginSize}% repeat(${
-                frameCount - 1
-              }, ${screenshotSize}%) ${marginSize}%`;
+            if (!verticalMode) {
+              // Update the grid columns definitions.
+              if (frameCount > 0) {
+                this.carousel.style.gridTemplateColumns = `${marginPercent}% repeat(${frameCount}, ${screenshotPercent}%) ${marginPercent}%`;
+              }
+            } else {
+              updateCarouselAttr(frameCount);
             }
 
             // Exit the carousel when closing the last window.
-            if (frameCount == 1) {
+            if (frameCount == 0) {
               actionsDispatcher.dispatch("close-carousel");
             }
           };
@@ -917,32 +1094,77 @@ class WindowManager extends HTMLElement {
         },
         { once: true }
       );
-      this.carouselObserver.observe(screenshot);
+      if (!verticalMode) {
+        this.carouselObserver.observe(screenshot);
+      }
       this.carousel.appendChild(screenshot);
 
       frame = frame.nextElementSibling;
     }
 
+    // Create an empty frame with the [+] used as a discoverable way to
+    // open a new frame.
+    let screenshot = document.createElement("div");
+    screenshot.classList.add("screenshot", "show", "new-tab");
+    if (!verticalMode) {
+      screenshot.classList.add("sideline");
+    }
+    screenshot.setAttribute("frame", "<new-tab>");
+    screenshot.innerHTML = `
+      <div class="head">
+        <div class="flex-fill"></div>
+        <sl-icon name="plus-circle"></sl-icon>
+        <div class="flex-fill"></div>
+      </div>`;
+    screenshot.addEventListener(
+      "click",
+      () => {
+        actionsDispatcher.dispatch("close-carousel");
+        // TODO: figure out why we need this setTimeout
+        window.setTimeout(() => {
+          actionsDispatcher.dispatch("new-tab");
+        }, 250);
+      },
+      { once: true }
+    );
+    if (!verticalMode) {
+      this.carouselObserver.observe(screenshot);
+    }
+    this.carousel.appendChild(screenshot);
+
     // Right padding div.
-    padding = document.createElement("div");
-    padding.classList.add("padding");
-    this.carouselObserver.observe(padding);
-    this.carousel.appendChild(padding);
+    if (!verticalMode) {
+      let padding = document.createElement("div");
+      padding.classList.add("padding");
+      this.carouselObserver.observe(padding);
+      this.carousel.appendChild(padding);
+    }
+
+    // Select the current frame, unless we come from the homescreen,
+    // in which case we select the first frame.
+    if (selectedIndex == -1) {
+      selectedIndex = 0;
+    }
+
+    let selectedFrame = this.carousel.querySelector(
+      `#carousel-screenshot-${selectedIndex}`
+    );
+    if (!selectedFrame) {
+      // When only the "new frame" screenshot is available, select it.
+      selectedFrame = this.carousel.querySelector(`div.screenshot`);
+    }
+    selectedFrame.classList.remove("sideline");
+    selectedFrame.scrollIntoView({
+      behavior: "instant",
+      block: "end",
+      inline: "center",
+    });
+
+    await Promise.all(readyPromises);
 
     // Hide the live content and show the carousel.
     this.windows.classList.add("hidden");
     this.carousel.classList.remove("hidden");
-
-    // Select the current frame, unless we come from the homescreen.
-    if (selectedIndex !== -1) {
-      document
-        .querySelector(`#carousel-screenshot-${selectedIndex}`)
-        .scrollIntoView({
-          behavior: "instant",
-          block: "end",
-          inline: "center",
-        });
-    }
 
     this.isCarouselOpen = true;
     this.keys.changeCarouselState(true);

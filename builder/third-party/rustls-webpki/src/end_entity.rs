@@ -12,11 +12,14 @@
 // ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 // OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
+#[cfg(feature = "alloc")]
+use crate::subject_name::GeneralDnsNameRef;
 use crate::{
-    cert, signed_data, subject_name, verify_cert, Error, SignatureAlgorithm, SubjectNameRef, Time,
-    TlsClientTrustAnchors, TlsServerTrustAnchors,
+    cert, signed_data, subject_name, verify_cert, CertRevocationList, Error, KeyUsage,
+    SignatureAlgorithm, SubjectNameRef, Time, TrustAnchor,
 };
-use core::convert::TryFrom;
+#[allow(deprecated)]
+use crate::{TlsClientTrustAnchors, TlsServerTrustAnchors};
 
 /// An end-entity certificate.
 ///
@@ -60,7 +63,7 @@ impl<'a> TryFrom<&'a [u8]> for EndEntityCert<'a> {
     /// `cert_der`.
     fn try_from(cert_der: &'a [u8]) -> Result<Self, Self::Error> {
         Ok(Self {
-            inner: cert::parse_cert(
+            inner: cert::Cert::from_der(
                 untrusted::Input::from(cert_der),
                 cert::EndEntityOrCa::EndEntity,
             )?,
@@ -73,6 +76,62 @@ impl<'a> EndEntityCert<'a> {
         &self.inner
     }
 
+    fn verify_is_valid_cert(
+        &self,
+        supported_sig_algs: &[&SignatureAlgorithm],
+        trust_anchors: &[TrustAnchor],
+        intermediate_certs: &[&[u8]],
+        time: Time,
+        eku: KeyUsage,
+        crls: &[&dyn CertRevocationList],
+    ) -> Result<(), Error> {
+        verify_cert::build_chain(
+            &verify_cert::ChainOptions {
+                eku,
+                supported_sig_algs,
+                trust_anchors,
+                intermediate_certs,
+                crls,
+            },
+            &self.inner,
+            time,
+        )
+    }
+
+    /// Verifies that the end-entity certificate is valid for use against the
+    /// specified Extended Key Usage (EKU).
+    ///
+    /// * `supported_sig_algs` is the list of signature algorithms that are
+    ///   trusted for use in certificate signatures; the end-entity certificate's
+    ///   public key is not validated against this list.
+    /// * `trust_anchors` is the list of root CAs to trust
+    /// * `intermediate_certs` is the sequence of intermediate certificates that
+    ///   the server sent in the TLS handshake.
+    /// * `time` is the time for which the validation is effective (usually the
+    ///   current time).
+    /// * `usage` is the intended usage of the certificate, indicating what kind
+    ///   of usage we're verifying the certificate for.
+    /// * `crls` is the list of certificate revocation lists to check
+    ///   the certificate against.
+    pub fn verify_for_usage(
+        &self,
+        supported_sig_algs: &[&SignatureAlgorithm],
+        trust_anchors: &[TrustAnchor],
+        intermediate_certs: &[&[u8]],
+        time: Time,
+        usage: KeyUsage,
+        crls: &[&dyn CertRevocationList],
+    ) -> Result<(), Error> {
+        self.verify_is_valid_cert(
+            supported_sig_algs,
+            trust_anchors,
+            intermediate_certs,
+            time,
+            usage,
+            crls,
+        )
+    }
+
     /// Verifies that the end-entity certificate is valid for use by a TLS
     /// server.
     ///
@@ -83,6 +142,14 @@ impl<'a> EndEntityCert<'a> {
     /// intermediate certificates that the server sent in the TLS handshake.
     /// `time` is the time for which the validation is effective (usually the
     /// current time).
+    #[allow(deprecated)]
+    #[deprecated(
+        since = "0.101.2",
+        note = "The per-usage trust anchor representations and verification functions are deprecated in \
+        favor of the general-purpose `TrustAnchor` type and `EndEntity::verify_for_usage` function. \
+        The new `verify_for_usage` function expresses trust anchor and end entity purpose with the \
+        key usage argument."
+    )]
     pub fn verify_is_valid_tls_server_cert(
         &self,
         supported_sig_algs: &[&SignatureAlgorithm],
@@ -90,22 +157,18 @@ impl<'a> EndEntityCert<'a> {
         intermediate_certs: &[&[u8]],
         time: Time,
     ) -> Result<(), Error> {
-        verify_cert::build_chain(
-            verify_cert::EKU_SERVER_AUTH,
+        self.verify_is_valid_cert(
             supported_sig_algs,
             trust_anchors,
             intermediate_certs,
-            &self.inner,
             time,
-            0,
+            KeyUsage::server_auth(),
+            &[],
         )
     }
 
     /// Verifies that the end-entity certificate is valid for use by a TLS
     /// client.
-    ///
-    /// If the certificate is not valid for any of the given names then this
-    /// fails with `Error::CertNotValidForName`.
     ///
     /// `supported_sig_algs` is the list of signature algorithms that are
     /// trusted for use in certificate signatures; the end-entity certificate's
@@ -115,21 +178,29 @@ impl<'a> EndEntityCert<'a> {
     /// `cert` is the purported end-entity certificate of the client. `time` is
     /// the time for which the validation is effective (usually the current
     /// time).
+    #[allow(deprecated)]
+    #[deprecated(
+        since = "0.101.2",
+        note = "The per-usage trust anchor representations and verification functions are deprecated in \
+        favor of the general-purpose `TrustAnchor` type and `EndEntity::verify_for_usage` function. \
+        The new `verify_for_usage` function expresses trust anchor and end entity purpose with the \
+        key usage argument."
+    )]
     pub fn verify_is_valid_tls_client_cert(
         &self,
         supported_sig_algs: &[&SignatureAlgorithm],
         &TlsClientTrustAnchors(trust_anchors): &TlsClientTrustAnchors,
         intermediate_certs: &[&[u8]],
         time: Time,
+        crls: &[&dyn CertRevocationList],
     ) -> Result<(), Error> {
-        verify_cert::build_chain(
-            verify_cert::EKU_CLIENT_AUTH,
+        self.verify_is_valid_cert(
             supported_sig_algs,
             trust_anchors,
             intermediate_certs,
-            &self.inner,
             time,
-            0,
+            KeyUsage::client_auth(),
+            crls,
         )
     }
 
@@ -173,5 +244,72 @@ impl<'a> EndEntityCert<'a> {
             untrusted::Input::from(msg),
             untrusted::Input::from(signature),
         )
+    }
+
+    /// Returns a list of the DNS names provided in the subject alternative names extension
+    ///
+    /// This function must not be used to implement custom DNS name verification.
+    /// Verification functions are already provided as `verify_is_valid_for_dns_name`
+    /// and `verify_is_valid_for_at_least_one_dns_name`.
+    #[cfg(feature = "alloc")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+    pub fn dns_names(&'a self) -> Result<impl Iterator<Item = GeneralDnsNameRef<'a>>, Error> {
+        subject_name::list_cert_dns_names(self)
+    }
+}
+
+#[cfg(feature = "alloc")]
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils;
+
+    // This test reproduces https://github.com/rustls/webpki/issues/167 --- an
+    // end-entity cert where the common name is a `PrintableString` rather than
+    // a `UTF8String` cannot iterate over its subject alternative names.
+    #[test]
+    fn printable_string_common_name() {
+        const DNS_NAME: &str = "test.example.com";
+
+        let issuer = test_utils::make_issuer("Test", None);
+
+        let ee_cert_der = {
+            let mut params = rcgen::CertificateParams::new(vec![DNS_NAME.to_string()]);
+            // construct a certificate that uses `PrintableString` as the
+            // common name value, rather than `UTF8String`.
+            params.distinguished_name.push(
+                rcgen::DnType::CommonName,
+                rcgen::DnValue::PrintableString("example.com".to_string()),
+            );
+            params.is_ca = rcgen::IsCa::ExplicitNoCa;
+            params.alg = test_utils::RCGEN_SIGNATURE_ALG;
+            let cert = rcgen::Certificate::from_params(params)
+                .expect("failed to make ee cert (this is a test bug)");
+            cert.serialize_der_with_signer(&issuer)
+                .expect("failed to serialize signed ee cert (this is a test bug)")
+        };
+
+        expect_dns_name(&ee_cert_der, DNS_NAME);
+    }
+
+    // This test reproduces https://github.com/rustls/webpki/issues/167 --- an
+    // end-entity cert where the common name is an empty SEQUENCE.
+    #[test]
+    fn empty_sequence_common_name() {
+        // handcrafted cert DER produced using `ascii2der`, since `rcgen` is
+        // unwilling to generate this particular weird cert.
+        let ee_cert_der = include_bytes!("../tests/misc/empty_sequence_common_name.der").as_slice();
+        expect_dns_name(ee_cert_der, "example.com");
+    }
+
+    fn expect_dns_name(der: &[u8], name: &str) {
+        let cert =
+            EndEntityCert::try_from(der).expect("should parse end entity certificate correctly");
+
+        let mut names = cert
+            .dns_names()
+            .expect("should get all DNS names correctly for end entity cert");
+        assert_eq!(names.next().map(<&str>::from), Some(name));
+        assert_eq!(names.next().map(<&str>::from), None);
     }
 }

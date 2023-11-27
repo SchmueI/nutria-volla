@@ -74,6 +74,7 @@ class LockScreen extends HTMLElement {
           <div class="time"></div>
           <div class="date"></div>
         </div>
+        <media-controller-list></media-controller-list>
         <div class="slider">
           <div class="slider-fill">
             <sl-icon name="chevron-up"></sl-icon>
@@ -214,7 +215,7 @@ class LockScreen extends HTMLElement {
         } else {
           flIcon.classList.remove("active");
         }
-        flIcon.setAttribute("kind", enabled ? "flashlight" : "flashlight-off");
+        flIcon.setAttribute("name", enabled ? "flashlight" : "flashlight-off");
       }
     );
   }

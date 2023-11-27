@@ -136,6 +136,7 @@ class PermissionsHelper {
     this.origin = drawer.querySelector(".origin");
     this.btnAllow = drawer.querySelector("#permission-allow");
     this.btnBlock = drawer.querySelector("#permission-block");
+    this.rememberMe = drawer.querySelector("#permission-remember");
     this.btnAllow.addEventListener("click", this);
     this.btnBlock.addEventListener("click", this);
     this.current = null;
@@ -154,11 +155,13 @@ class PermissionsHelper {
       return;
     }
 
+    let remember = this.rememberMe.checked;
+
     if (event.target === this.btnBlock) {
       let detail = {
         origin: this.current.origin,
         granted: false,
-        remember: false,
+        remember,
         choices: {},
       };
       this.dispatchResult(detail);
@@ -176,7 +179,7 @@ class PermissionsHelper {
       let detail = {
         origin: this.current.origin,
         granted: true,
-        remember: false,
+        remember,
         choices,
       };
       // console.log(`Will dispatch ${JSON.stringify(detail)}`);
@@ -190,7 +193,11 @@ class PermissionsHelper {
       geolocation: "map-pin",
       "audio-capture": "mic",
       "video-capture": "video",
+      "desktop-notification": "bell",
     };
+    if (!icons[permName]) {
+      console.error(`Missing icon for permission: ${permName}`);
+    }
     return icons[permName] || "help-circle";
   }
 
@@ -350,6 +357,8 @@ class ContentWindow extends HTMLElement {
     // Track the keyboard state, to re-open it if needed when switching back
     // to a frame with a focused element.
     this.keyboardOpen = false;
+
+    this.screenshot = null;
   }
 
   addSiteInfoListeners() {
@@ -371,8 +380,8 @@ class ContentWindow extends HTMLElement {
     this.state.fromLockscreen = config.fromLockscreen;
     this.state.whenClosed = config.whenClosed;
     this.state.display = config.details?.display;
-    if (!config.isHomescreen) {
-      this.classList.add("not-homescreen");
+    if (config.isHomescreen) {
+      this.classList.add("homescreen");
     }
   }
 
@@ -434,7 +443,7 @@ class ContentWindow extends HTMLElement {
     let ua = window.uaStore.getUaFor(url);
     if (ua) {
       this.webView.linkedBrowser.browsingContext.customUserAgent =
-        UAHelper.get(ua);
+        embedder.uaHelper.get(ua);
       this.state.ua = ua;
     } else {
       this.state.ua = null;
@@ -462,11 +471,16 @@ class ContentWindow extends HTMLElement {
       browsingContextGroupIdAttr = `browsingContextGroupId="${this.config.browsingContextGroupId}"`;
     }
 
+    this.state.privatebrowsing = !!this.config.details?.privatebrowsing;
+    let privateBrowsingAttr = "";
+    if (this.state.privatebrowsing) {
+      privateBrowsingAttr = `privatebrowsing="true"`;
+    }
+
     let container = document.createElement("div");
     container.classList.add("container");
     container.innerHTML = `
-      <link rel="stylesheet" href="components/content_window.css">
-      <web-view remote="true" remoteType="${remoteType}" ${browsingContextGroupIdAttr} ${transparent}></web-view>
+      <web-view remote="${this.config.remote}" remoteType="${remoteType}" ${privateBrowsingAttr} ${browsingContextGroupIdAttr} ${transparent}></web-view>
       <div class="loader running">
         <sl-icon name="loader"></sl-icon>
         <img class="hidden"/>
@@ -495,6 +509,7 @@ class ContentWindow extends HTMLElement {
         <header class="origin"></header>
         <div class="items">
         </div>
+        <sl-switch id="permission-remember" data-l10n-id="permissions-remember"></sl-switch>
         <div slot="footer">
           <sl-button id="permission-allow" variant="success" data-l10n-id="permissions-allow"></sl-button>
           <sl-button id="permission-block" variant="danger" data-l10n-id="permissions-block"></sl-button>
@@ -538,6 +553,8 @@ class ContentWindow extends HTMLElement {
 
     this.pid = this.webView.processid;
 
+    this.gotTheme = false;
+
     this.webViewHandler = this.handleBrowserEvent.bind(this);
 
     this.overscrollHandler = this.handleOverscrollEvent.bind(this);
@@ -547,6 +564,12 @@ class ContentWindow extends HTMLElement {
       let { backgroundColor, icon, title } = this.config.details;
       if (backgroundColor) {
         this.loader.style.backgroundColor = backgroundColor;
+      }
+      if (this.state.privatebrowsing) {
+        this.loader.style.backgroundColor = null;
+        this.loader.classList.add("privatebrowsing");
+      } else {
+        this.loader.classList.remove("privatebrowsing");
       }
       if (icon) {
         this.loader.classList.remove("running");
@@ -641,6 +664,23 @@ class ContentWindow extends HTMLElement {
         await channel.setMuted(false);
       }
     });
+
+    // Initial audio state. isPlayingAudio is updated by the media controller
+    // and audioMuted reflect the changes triggered by toggleMutedState().
+    this.isPlayingAudio = false;
+    this.audioMuted = false;
+  }
+
+  toggleMutedState() {
+    this.audioMuted = !this.audioMuted;
+    if (this.audioMuted) {
+      this.webView.linkedBrowser.mute(false);
+    } else {
+      this.webView.linkedBrowser.unmute();
+    }
+    // Update the frame list to sync up the "playing audio" icon.
+    window.wm.updateFrameList();
+    return this.audioMuted;
   }
 
   initWebView() {
@@ -661,6 +701,37 @@ class ContentWindow extends HTMLElement {
       "supportedkeyschange",
     ].forEach((name) => {
       this.mediaController.addEventListener(name, async (event) => {
+        // Special case when deactivating, since there is no need to
+        // get metadata etc.
+        if (event.type === "deactivated") {
+          actionsDispatcher.dispatch("media-controller-change", {
+            event: event.type,
+            controller: this.mediaController,
+          });
+
+          this.isPlayingAudio = false;
+          // Update the frame list to sync up the "playing audio" icon.
+          window.wm.updateFrameList();
+          return;
+        }
+
+        let meta = this.mediaController.getMetadata();
+        if (this.ogImage) {
+          meta.ogImage = this.ogImage;
+        }
+        meta.backgroundColor = this.state.backgroundColor;
+        meta.icon = this.state.icon;
+
+        actionsDispatcher.dispatch("media-controller-change", {
+          event: event.type,
+          controller: this.mediaController,
+          meta,
+        });
+
+        this.isPlayingAudio = this.mediaController.isPlaying;
+        // Update the frame list to sync up the "playing audio" icon.
+        window.wm.updateFrameList();
+
         // For now, prevent media playing in Tiles from being indexed.
         if (this.state.url.startsWith("tile://")) {
           return;
@@ -677,13 +748,9 @@ class ContentWindow extends HTMLElement {
         if (
           (event.type === "metadatachange" ||
             event.type === "playbackstatechange") &&
-          this.mediaController.playbackState === "playing"
+          this.mediaController.playbackState === "playing" &&
+          !this.state.privatebrowsing
         ) {
-          let meta = this.mediaController.getMetadata();
-          if (this.ogImage) {
-            meta.ogImage = this.ogImage;
-          }
-          meta.backgroundColor = this.state.backgroundColor;
           await contentManager.createOrUpdateMediaEntry(
             this.state.url,
             this.state.icon,
@@ -954,7 +1021,7 @@ class ContentWindow extends HTMLElement {
       return;
     }
 
-    if (placesUpdateNeeded) {
+    if (placesUpdateNeeded && !this.state.privatebrowsing) {
       await contentManager.createOrUpdatePlacesEntry(
         this.state.url,
         this.state.title,
@@ -989,7 +1056,7 @@ class ContentWindow extends HTMLElement {
       this.state.backgroundColor = window.getComputedStyle(x).color;
       this.dispatchStateUpdate();
     } catch (e) {}
-    x.parentNode.removeChild(x);
+    x.remove();
   }
 
   hideLoader() {
@@ -1122,6 +1189,7 @@ class ContentWindow extends HTMLElement {
         }
         break;
       case "loadend":
+        this.classList.remove("loading");
         if (!this.gotTheme) {
           this.webView
             .getBackgroundColor()
@@ -1141,7 +1209,8 @@ class ContentWindow extends HTMLElement {
         // when loading moz-extension:// documents.
         if (
           !this.loader.classList.contains("hidden") &&
-          this.state.url.startsWith("moz-extension://")
+          (this.state.url.startsWith("moz-extension://") ||
+            this.state.url.startsWith("about:"))
         ) {
           this.hideLoader();
         }
@@ -1262,9 +1331,10 @@ class ContentWindow extends HTMLElement {
         this.recordVideo = detail.video;
         break;
       case "loadstart":
+        this.classList.add("loading");
         // Reset state when loading a new document.
         this.state.icon = null;
-        this.state.title = null;
+        this.state.title = this.config.details?.title;
         this.state.manifestUrl = null;
         this.state.secure = "insecure";
         uiUpdateNeeded = true;
@@ -1280,7 +1350,11 @@ class ContentWindow extends HTMLElement {
 
     if (uiUpdateNeeded || placesUpdateNeeded) {
       await this.updateUi(placesUpdateNeeded);
-      if (!this.config.isHomescreen && eventType === "locationchange") {
+      if (
+        !this.state.privatebrowsing &&
+        !this.config.isHomescreen &&
+        eventType === "locationchange"
+      ) {
         await contentManager.visitPlace(this.state.url);
       }
     }
@@ -1288,7 +1362,7 @@ class ContentWindow extends HTMLElement {
 
   // Register an opensearch provider if it's not known yet.
   async maybeAddOpenSearch(url) {
-    if (!this.openSearchManager) {
+    if (!this.openSearchManager && !this.state.privatebrowsing) {
       this.openSearchManager = contentManager.getOpenSearchManager();
       await this.openSearchManager.init();
     }
@@ -1350,8 +1424,32 @@ class ContentWindow extends HTMLElement {
       }
     });
 
+    // Replace Gecko's hardcoded icon by our brand logo.
+    if (this.state.icon == "chrome://branding/content/icon32.png") {
+      this.state.icon = window.config.brandLogo;
+    }
+
     // We have a new icon, update the UI state.
     if (found) {
+      // Used by about:processes to display the tab icon.
+      // This needs to be a base64 url to be loaded in the about: page.
+      let favicon = new Image();
+      favicon.onload = () => {
+        let canvas = new OffscreenCanvas(favicon.width, favicon.height);
+        let context = canvas.getContext("2d");
+        context.drawImage(favicon, 0, 0);
+
+        canvas.convertToBlob().then((blob) => {
+          let reader = new FileReader();
+          reader.onloadend = () => {
+            let url = reader.result;
+            this.webView.linkedBrowser.setAttribute("image", url);
+          };
+          reader.readAsDataURL(blob);
+        });
+      };
+      favicon.src = this.state.icon;
+
       await this.updateUi(true);
     }
   }
@@ -1363,35 +1461,16 @@ class ContentWindow extends HTMLElement {
       return Promise.resolve(new Blob());
     }
 
-    // We are already waiting for a screenshot, bail out.
-    if (this.screenshotId) {
-      return Promise.resolve(new Blob());
-    }
-
     return new Promise((resolve) => {
-      this.screenshotId = window.requestIdleCallback(() => {
-        let start = Date.now();
-        let mimeType = this.config.isHomescreen ? "image/png" : "image/jpeg";
-        this.webView
-          .getScreenshot(window.innerWidth, window.innerHeight, mimeType)
-          .then((blob) => {
-            this.screenshotId = null;
-            console.log(`Got screenshot: ${blob} in ${Date.now() - start}ms`);
-            this.screenshot = blob;
-            resolve(blob);
-          });
-      });
+      let start = Date.now();
+      this.webView
+        .getScreenshot(window.innerWidth, window.innerHeight, "image/jpeg")
+        .then((blob) => {
+          console.log(`Got screenshot: ${blob} in ${Date.now() - start}ms`);
+          this.screenshot = blob;
+          resolve(blob);
+        });
     });
-  }
-
-  // Returns the current screenshot if any, and a promise resolving to an updated one.
-  getScreenshot() {
-    if (this.config.isHomescreen) {
-      console.error(`getScreenShot() called for the homescreen!`);
-      return { current: null, next: Promise.resolve(new Blob()) };
-    }
-
-    return { current: this.screenshot, next: this.updateScreenshot() };
   }
 
   // Show the <select> UI as a tab-modal component.
@@ -1441,3 +1520,6 @@ class ContentWindow extends HTMLElement {
 }
 
 customElements.define("content-window", ContentWindow);
+
+// Add a single instance of the CSS for this custom element.
+addStylesheet("components/content_window.css");

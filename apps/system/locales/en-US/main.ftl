@@ -1,16 +1,12 @@
 # Generic actions
 button-ok = Ok
 button-cancel = Cancel
+button-add = Add
 
 # Power key menu actions
 action-shutdown = Shutdown
 action-reboot = Restart
 action-screenshot = Screenshot
-
-# The content of the empty carousel screen
-empty-carousel = No content open :(
-learn-something-text = Let's learn something!
-learn-something-url = https://en.wikipedia.org/wiki/Special:Random
 
 # Message displayed when a site crashes.
 content-crashed = Something went wrong with this page!
@@ -26,6 +22,7 @@ link-section-title = Link
 link-copy = Copy
 link-copied = Link Successfully copied to Clipboard
 link-new-tab = Open In New Tab
+link-new-private-tab = Open In New Private Tab
 link-share = Share…
 link-download = Save Link
 page-section-title = Page
@@ -36,7 +33,11 @@ selection-share = Share…
 selection-search = Search ”{$query}”
 
 # Site Info Panel
-site-info-add-home = Add To Home
+site-info-install-pwa = Install
+site-info-add-favorite = Add Favorite
+site-info-remove-favorite = Remove Favorite
+siteinfo-ask-add-to-home-title = New Favorite
+siteinfo-ask-add-to-home-text = Do you want to add this favorite to your homescreen?
 site-info-split-screen = Split Screen
 site-info-choose-ua = User Agent
 site-info-b2g-ua = Default
@@ -177,15 +178,24 @@ activity-p2p-tile-start = Select Tile
 activity-scan-qr-code = Scan QR Code
 activity-view-resource = View File
 activity-publish-resource = Publish File
-activity-install-wasm-plugin = Install WASM plugin
 activity-process-image = Process image with…
 
 # Permissions prompt panel
 permissions-title = Permission Request
 permissions-block = Block
 permissions-allow = Allow
+permissions-remember = Remember this decision
 permissions-name-geolocation = Geolocation
 permissions-name-audio-capture = Audio Recording
 permissions-name-video-capture = Video Recording
+permissions-name-desktop-notification = Notifications
 
-confirm-remember-my-choice = Remember My Choice
+confirm-remember-my-choice = Remember this decision
+
+pairing-dialog-title = Enter this code in the remote to connect
+
+# Selection floatin menu
+caret-selection-copy = Copy
+caret-selection-search = Search
+caret-selection-select-all = Select all
+caret-selection-share = Share

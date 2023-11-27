@@ -27,7 +27,7 @@ window-manager .windows {
   scroll-behavior: smooth;
   scrollbar-width: none;
 
-  transition: all 0.3s cubic-bezier(0.2, 0.9, 0.1, 1.0);
+  transition: all 0.15s cubic-bezier(0.2, 0.9, 0.1, 1), backdrop-filter none;
 }
 
 window-manager.lock-swipe .windows {
@@ -42,11 +42,11 @@ window-manager .windows > content-window {
 }
 
 window-manager .windows > content-window.opening {
-  animation: windowOpen 0.3s cubic-bezier(0.2, 0.9, 0.1, 1.0);
+  animation: windowOpen 0.3s cubic-bezier(0.2, 0.9, 0.1, 1);
 }
 
 window-manager .windows > content-window.closing {
-  animation: windowClose 0.3s cubic-bezier(0.2, 0.9, 0.1, 1.0);
+  animation: windowClose 0.3s cubic-bezier(0.2, 0.9, 0.1, 1);
 }
 
 @keyframes windowOpen {
@@ -55,14 +55,14 @@ window-manager .windows > content-window.closing {
     opacity: 0;
   }
   to {
-    transform: scale(1.0);
+    transform: scale(1);
     opacity: 1;
   }
 }
 
 @keyframes windowClose {
   from {
-    transform: scale(1.0);
+    transform: scale(1);
     opacity: 1;
   }
   to {
@@ -80,8 +80,7 @@ window-manager .carousel {
   display: grid;
   grid-auto-flow: column;
   grid-template-rows: 1fr;
-  grid-gap: 1em;
-  backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: var(--carousel-backdrop);
 
   /* This element will overflow scroll and scroll-snap */
   overflow-x: scroll;
@@ -89,28 +88,27 @@ window-manager .carousel {
   scroll-behavior: smooth;
   scrollbar-width: none;
 
-  transition: all 0.3s cubic-bezier(0.2, 0.9, 0.1, 1.0);
+  transition: all 0.15s cubic-bezier(0.2, 0.9, 0.1, 1), backdrop-filter none;
 }
 
-window-manager .carousel > div:not(.empty-carousel) {
+window-manager .carousel > div {
   scroll-snap-align: center;
   scroll-snap-stop: always;
   height: 75%;
   margin-top: auto;
   margin-bottom: auto;
-  background-size: contain;
 }
 
 /* Desktop mode */
 @media (min-width: 800px) {
-  window-manager .carousel > div:not(.empty-carousel) {
+  window-manager .carousel > div {
     height: 50%;
   }
 }
 
 window-manager .carousel > div.screenshot {
   background-color: rgba(255, 255, 255, 0.5);
-  background-size: contain;
+  background-size: cover;
   background-repeat: no-repeat;
   background-position: center;
   transition: all 0.1s linear;
@@ -118,9 +116,21 @@ window-manager .carousel > div.screenshot {
   opacity: 0;
 }
 
+window-manager .carousel > div.new-tab sl-icon {
+  font-size: 5rem;
+}
+
+window-manager .carousel > div.new-tab {
+  background-color: var(--sl-panel-background-color);
+  color: env(theme-wallpaper-accent);
+}
+
+window-manager .carousel > div.screenshot.privatebrowsing {
+  border: 4px solid #8000d7;
+}
+
 window-manager .carousel > div.screenshot.show {
   opacity: 1;
-  transition: opacity 0.05s linear;
 }
 
 window-manager .carousel > div.screenshot.middle {
@@ -138,15 +148,7 @@ window-manager .carousel > div.screenshot.sideline {
 window-manager .carousel > div.screenshot.closing {
   transform: scale(0.75);
   opacity: 0;
-  transition: all 0.3s ease;
-}
-
-window-manager .carousel > div.empty-carousel {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  transition: all 0.2s ease;
 }
 
 window-manager .carousel > div .head {
@@ -156,14 +158,20 @@ window-manager .carousel > div .head {
   height: 100%;
 }
 
-window-manager .carousel > div .head .close-icon {
+window-manager .carousel > div .head footer {
+  display: flex;
+  gap: 2em;
+  transform: translateY(1.5rem);
+}
+
+window-manager .carousel > div .head .close-icon,
+window-manager .carousel > div .head .audio-play {
   background-color: var(--sl-panel-background-color);
   color: var(--sl-color-neutral-700);
   width: 2.5rem;
   height: 2.5rem;
   border-radius: 40%;
   box-shadow: 2px 2px 3px black;
-  transform: translateY(1em);
   font-size: 2rem;
   display: flex;
   justify-content: center;
@@ -179,27 +187,58 @@ window-manager .carousel > div .head .favicon {
   transform: translateY(-1em);
 }
 
-window-manager .carousel .empty-carousel {
-  text-align: center;
-  color: var(--sl-color-primary-500);
-  text-shadow: black 1px 1px;
-}
-
-window-manager .carousel .empty-carousel img {
-  width: 128px;
-  height: 128px;
-  animation: logo-anim 6s linear infinite;
-}
-
-window-manager .carousel .empty-carousel .learn-something {
-  padding: 1em;
-  text-decoration: underline;
-  cursor: pointer;
-  font-weight: bolder;
-}
-
 window-manager .hidden {
   visibility: hidden;
   opacity: 0;
   transform: scale(0.9);
+}
+
+/* Carousel in vertical scroll mode with 2 columns */
+
+:root {
+  --carousel-screenshot-height: 35vh;
+  --carousel-screenshot-width: 41vw;
+  --carousel-gap: calc((100vw - 2 * var(--carousel-screenshot-width)) / 3);
+}
+
+window-manager .carousel.vertical {
+  grid-template-columns: var(--carousel-screenshot-width) var(
+      --carousel-screenshot-width
+    );
+  grid-template-rows: repeat(auto-fill, var(--carousel-screenshot-height));
+  grid-auto-flow: row;
+  gap: var(--carousel-gap);
+  padding: var(--carousel-gap);
+  overflow-y: scroll;
+}
+
+window-manager .carousel.vertical.single-row {
+  padding-top: calc((100vh - var(--carousel-screenshot-height)) / 2);
+}
+
+window-manager .carousel.vertical.two-rows {
+  padding-top: calc(
+    (100vh - var(--carousel-gap) - 2 * var(--carousel-screenshot-height)) / 2
+  );
+}
+
+window-manager .carousel.vertical.single-column {
+  padding-left: calc((100vw - var(--carousel-screenshot-width)) / 2);
+  padding-right: calc((100vw - var(--carousel-screenshot-width)) / 2);
+}
+
+window-manager .carousel.vertical > div {
+  height: initial;
+  margin-top: initial;
+  margin-bottom: initial;
+  border-radius: 1em;
+  background-position-y: top;
+}
+
+window-manager .carousel.vertical > div .head {
+  height: var(--carousel-screenshot-height);
+}
+
+window-manager .carousel.vertical > div .head footer {
+  transform: translateY(-0.5em);
 }

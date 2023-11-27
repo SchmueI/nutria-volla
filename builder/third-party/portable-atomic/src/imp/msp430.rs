@@ -8,6 +8,8 @@
 // See also src/imp/interrupt/msp430.rs.
 //
 // Note: Ordering is always SeqCst.
+//
+// Refs: https://www.ti.com/lit/ug/slau208q/slau208q.pdf
 
 #[cfg(not(portable_atomic_no_asm))]
 use core::arch::asm;
@@ -49,84 +51,6 @@ pub fn compiler_fence(order: Ordering) {
         asm!("", options(nostack, preserves_flags));
         #[cfg(portable_atomic_no_asm)]
         llvm_asm!("" ::: "memory" : "volatile");
-    }
-}
-
-#[cfg(any(test, not(feature = "critical-section")))]
-#[repr(transparent)]
-pub(crate) struct AtomicBool {
-    #[allow(dead_code)]
-    v: UnsafeCell<u8>,
-}
-
-#[cfg(any(test, not(feature = "critical-section")))]
-// Send is implicitly implemented.
-// SAFETY: any data races are prevented by atomic operations.
-unsafe impl Sync for AtomicBool {}
-
-#[cfg(any(test, not(feature = "critical-section")))]
-impl AtomicBool {
-    #[cfg(test)]
-    #[inline]
-    pub(crate) const fn new(v: bool) -> Self {
-        Self { v: UnsafeCell::new(v as u8) }
-    }
-
-    #[cfg(test)]
-    #[inline]
-    pub(crate) fn is_lock_free() -> bool {
-        Self::is_always_lock_free()
-    }
-    #[cfg(test)]
-    #[inline]
-    pub(crate) const fn is_always_lock_free() -> bool {
-        true
-    }
-
-    #[cfg(test)]
-    #[inline]
-    pub(crate) fn get_mut(&mut self) -> &mut bool {
-        // SAFETY: the mutable reference guarantees unique ownership.
-        unsafe { &mut *self.v.get().cast::<bool>() }
-    }
-
-    #[cfg(test)]
-    #[inline]
-    pub(crate) fn into_inner(self) -> bool {
-        self.v.into_inner() != 0
-    }
-
-    #[inline]
-    #[cfg_attr(all(debug_assertions, not(portable_atomic_no_track_caller)), track_caller)]
-    pub(crate) fn load(&self, order: Ordering) -> bool {
-        self.as_atomic_u8().load(order) != 0
-    }
-
-    #[inline]
-    #[cfg_attr(all(debug_assertions, not(portable_atomic_no_track_caller)), track_caller)]
-    pub(crate) fn store(&self, val: bool, order: Ordering) {
-        self.as_atomic_u8().store(val as u8, order);
-    }
-
-    #[inline]
-    pub(crate) fn and(&self, val: bool, order: Ordering) {
-        self.as_atomic_u8().and(val as u8, order);
-    }
-
-    #[inline]
-    pub(crate) fn or(&self, val: bool, order: Ordering) {
-        self.as_atomic_u8().or(val as u8, order);
-    }
-
-    #[inline]
-    pub(crate) fn xor(&self, val: bool, order: Ordering) {
-        self.as_atomic_u8().xor(val as u8, order);
-    }
-
-    #[inline]
-    fn as_atomic_u8(&self) -> &AtomicU8 {
-        // SAFETY: AtomicBool and AtomicU8 have the same layout,
-        unsafe { &*(self as *const AtomicBool).cast::<AtomicU8>() }
     }
 }
 
@@ -243,6 +167,7 @@ macro_rules! atomic {
                         concat!("add", $asm_suffix, " {val}, 0({dst})"),
                         dst = in(reg) dst,
                         val = in(reg) val,
+                        // Do not use `preserves_flags` because ADD modifies the V, N, Z, and C bits of the status register.
                         options(nostack),
                     );
                     #[cfg(portable_atomic_no_asm)]
@@ -264,6 +189,7 @@ macro_rules! atomic {
                         concat!("sub", $asm_suffix, " {val}, 0({dst})"),
                         dst = in(reg) dst,
                         val = in(reg) val,
+                        // Do not use `preserves_flags` because SUB modifies the V, N, Z, and C bits of the status register.
                         options(nostack),
                     );
                     #[cfg(portable_atomic_no_asm)]
@@ -285,6 +211,7 @@ macro_rules! atomic {
                         concat!("and", $asm_suffix, " {val}, 0({dst})"),
                         dst = in(reg) dst,
                         val = in(reg) val,
+                        // Do not use `preserves_flags` because AND modifies the V, N, Z, and C bits of the status register.
                         options(nostack),
                     );
                     #[cfg(portable_atomic_no_asm)]
@@ -306,7 +233,7 @@ macro_rules! atomic {
                         concat!("bis", $asm_suffix, " {val}, 0({dst})"),
                         dst = in(reg) dst,
                         val = in(reg) val,
-                        options(nostack),
+                        options(nostack, preserves_flags),
                     );
                     #[cfg(portable_atomic_no_asm)]
                     llvm_asm!(
@@ -327,6 +254,7 @@ macro_rules! atomic {
                         concat!("xor", $asm_suffix, " {val}, 0({dst})"),
                         dst = in(reg) dst,
                         val = in(reg) val,
+                        // Do not use `preserves_flags` because XOR modifies the V, N, Z, and C bits of the status register.
                         options(nostack),
                     );
                     #[cfg(portable_atomic_no_asm)]
@@ -347,6 +275,7 @@ macro_rules! atomic {
                     asm!(
                         concat!("inv", $asm_suffix, " 0({dst})"),
                         dst = in(reg) dst,
+                        // Do not use `preserves_flags` because INV modifies the V, N, Z, and C bits of the status register.
                         options(nostack),
                     );
                     #[cfg(portable_atomic_no_asm)]

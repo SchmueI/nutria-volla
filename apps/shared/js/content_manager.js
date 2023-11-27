@@ -24,10 +24,6 @@ export class ContentManager extends EventTarget {
     svc.withUcan(ucan);
   }
 
-  getPluginsManager(callback) {
-    return new PluginsManager(callback);
-  }
-
   getOpenSearchManager(callback) {
     this.log(`getOpenSearchManager`);
     return new OpenSearchManager(callback);
@@ -317,12 +313,13 @@ export class ContentManager extends EventTarget {
 
   // Remove the hash part if any.
   cleanupUrl(url) {
-    let res = url.trim();
-    let hash = res.indexOf("#");
-    if (hash !== -1) {
-      res = res.substring(0, hash);
+    if (URL.canParse(url)) {
+      let res = new URL(url);
+      res.hash = "";
+      return res.href;
+    } else {
+      return null;
     }
-    return res;
   }
 
   // Creates or updates a places entry.
@@ -362,6 +359,12 @@ export class ContentManager extends EventTarget {
       url,
       highPriority ? lib.VisitPriority.HIGH : lib.VisitPriority.NORMAL
     );
+  }
+
+  async getPlace(url) {
+    let places = await this.ensureTopLevelContainer("places");
+    let entry = await this.childByName(places, url);
+    return entry;
   }
 
   async visitPlace(url, highPriority = false) {
@@ -613,6 +616,10 @@ class ContentResource {
     return this._meta;
   }
 
+  get id() {
+    return this._meta.id;
+  }
+
   async update(blob, variant = "default") {
     await this._svc.updateVariant(this._meta.id, variant, blob);
     this._variants.set(variant, blob);
@@ -672,124 +679,6 @@ class ContentResource {
   }
 }
 
-// Helper to abstract Web Assembly plugins storage & management.
-class PluginsManager extends ContentManager {
-  constructor(updatedCallback = null) {
-    super();
-    this.container = null;
-    this.list = [];
-    if (updatedCallback && typeof updatedCallback === "function") {
-      this.onupdated = updatedCallback;
-    }
-  }
-
-  log(msg) {
-    console.log(`PluginsManager: ${msg}`);
-  }
-
-  error(msg) {
-    console.error(`PluginsManager: ${msg}`);
-  }
-
-  async ready() {
-    if (!this.container) {
-      this.container = await this.ensureTopLevelContainer("wasm plugins");
-      this.svc = await this.service;
-      this.lib = await this.lib();
-      await this.ensureHttpKey(this.svc);
-    }
-  }
-
-  async onchange(change) {
-    this.log(`plugin list modified: ${JSON.stringify(change)}`);
-    if (
-      change.kind == this.lib.ModificationKind.CHILD_CREATED ||
-      change.kind == this.lib.ModificationKind.CHILD_DELETED
-    ) {
-      await this.update();
-    }
-  }
-
-  async init() {
-    await this.ready();
-
-    await this.svc.addObserver(this.container, this.onchange.bind(this));
-    await this.update();
-  }
-
-  // Refresh the list of plugins.
-  async update() {
-    let cursor = await this.svc.childrenOf(this.container);
-
-    let list = [];
-    let done = false;
-    while (!done) {
-      try {
-        let children = await cursor.next();
-        for (let child of children) {
-          if (child.kind === this.lib.ResourceKind.LEAF) {
-            let blob = await this.svc.getVariant(child.id, "default");
-            list.push(
-              new ContentResource(
-                this.svc,
-                this.http_key,
-                child,
-                blob,
-                "default"
-              )
-            );
-          }
-        }
-      } catch (e) {
-        // cursor.next() rejects when no more items are available, so it's not
-        // a fatal error.
-        done = true;
-      }
-    }
-
-    this.log(`list updated: ${list.length} items.`);
-    this.list = list;
-    if (this.onupdated) {
-      this.onupdated(this.list);
-    }
-  }
-
-  // Add a new plugin from a url.
-  async add(json, url) {
-    await this.ready();
-
-    try {
-      // Fetch the plugin as a blob and verify the content type.
-      let plugin = await fetch(url);
-      let blob = await plugin.blob();
-      if (blob.type !== "application/wasm") {
-        this.error(
-          `Expected 'application/wasm' content type for ${url}, but got '${blob.type}'`
-        );
-        return;
-      }
-
-      // Store the new resource.
-      let meta = await this.svc.createobj(
-        {
-          parent: this.container,
-          name: url,
-          kind: this.lib.ResourceKind.LEAF,
-          tags: [],
-        },
-        "default",
-        new Blob([JSON.stringify(json)], { type: "application/json" })
-      );
-      let resource = new ContentResource(this.svc, this.http_key, meta);
-      await resource.update(blob, "wasm");
-
-      await this.update();
-    } catch (e) {
-      this.error(`Failed to add plugin: ${e}`);
-    }
-  }
-}
-
 // Helper to abstract open search description storage & management.
 // Search engines are stored in the 'search engines' top level container.
 // - Each search engine description is stored as a resource: the default
@@ -820,7 +709,7 @@ class OpenSearchManager extends ContentManager {
       let firstRun = !(await this.hasTopLevelContainer("opensearch"));
       this.container = await this.ensureTopLevelContainer("opensearch");
       this.svc = await this.service;
-      this.lib = await this.lib();
+      this._lib = await this.lib();
       await this.ensureHttpKey(this.svc);
 
       if (firstRun) {
@@ -832,14 +721,15 @@ class OpenSearchManager extends ContentManager {
   async onchange(change) {
     this.log(`list modified: ${JSON.stringify(change)}`);
     if (
-      change.kind == this.lib.ModificationKind.CHILD_CREATED ||
-      change.kind == this.lib.ModificationKind.CHILD_DELETED
+      change.kind == this._lib.ModificationKind.CHILD_CREATED ||
+      change.kind == this._lib.ModificationKind.CHILD_DELETED
     ) {
       await this.update();
     }
   }
 
   async init() {
+    this.frozen = false;
     await this.ready();
 
     await this.svc.addObserver(this.container, this.onchange.bind(this));
@@ -869,6 +759,10 @@ class OpenSearchManager extends ContentManager {
 
   // Refresh the list of search engines.
   async update() {
+    if (this.frozen) {
+      return;
+    }
+
     let cursor = await this.svc.childrenOf(this.container);
 
     let list = [];
@@ -877,7 +771,7 @@ class OpenSearchManager extends ContentManager {
       try {
         let children = await cursor.next();
         for (let child of children) {
-          if (child.kind === this.lib.ResourceKind.LEAF) {
+          if (child.kind === this._lib.ResourceKind.LEAF) {
             let json = await this.svc.getVariantJson(child.id, "default");
             list.push(
               new ContentResource(
@@ -925,7 +819,7 @@ class OpenSearchManager extends ContentManager {
       {
         parent: this.container,
         name: url,
-        kind: this.lib.ResourceKind.LEAF,
+        kind: this._lib.ResourceKind.LEAF,
         tags,
       },
       "default",
@@ -958,6 +852,8 @@ class OpenSearchManager extends ContentManager {
       if (iconUrl) {
         await resource.updateVariantFromUrl(iconUrl, "icon");
       }
+    } else if (favicon) {
+      await resource.updateVariantFromUrl(favicon, "icon");
     }
 
     await this.update();
@@ -1031,6 +927,8 @@ class OpenSearchManager extends ContentManager {
 
   async loadDefaults() {
     try {
+      this.frozen = true;
+
       let response = await fetch(
         `http://shared.localhost:${config.port}/opensearch/opensearch.json`
       );
@@ -1044,6 +942,9 @@ class OpenSearchManager extends ContentManager {
           item.source
         );
       }
+
+      this.frozen = false;
+      await this.update();
     } catch (e) {
       this.error(`Failed to load default search engines: ${e}`);
     }
@@ -1123,7 +1024,7 @@ class ContactsManager extends ContentManager {
     if (!this.container) {
       this.container = await this.ensureTopLevelContainer("contacts");
       this.svc = await this.service;
-      this.lib = await this.lib();
+      this._lib = await this.lib();
       await this.ensureHttpKey(this.svc);
     }
   }
@@ -1131,9 +1032,9 @@ class ContactsManager extends ContentManager {
   async onchange(change) {
     this.log(`list modified: ${JSON.stringify(change)}`);
     if (
-      change.kind == this.lib.ModificationKind.CHILD_CREATED ||
-      change.kind == this.lib.ModificationKind.CHILD_MODIFIED ||
-      change.kind == this.lib.ModificationKind.CHILD_DELETED
+      change.kind == this._lib.ModificationKind.CHILD_CREATED ||
+      change.kind == this._lib.ModificationKind.CHILD_MODIFIED ||
+      change.kind == this._lib.ModificationKind.CHILD_DELETED
     ) {
       await this.updateList();
     }
@@ -1154,7 +1055,7 @@ class ContactsManager extends ContentManager {
     if (!this.list) {
       await this.updateList();
     }
-    let contact = this.list.find(contact => {
+    let contact = this.list.find((contact) => {
       let dids = (contact.did || []).map((did) => did.uri);
       return dids.includes(did);
     });
@@ -1171,7 +1072,7 @@ class ContactsManager extends ContentManager {
       try {
         let children = await cursor.next();
         for (let child of children) {
-          if (child.kind === this.lib.ResourceKind.LEAF) {
+          if (child.kind === this._lib.ResourceKind.LEAF) {
             let blob = await this.svc.getVariant(child.id, "default");
             if (blob.type === CONTACTS_MIME_TYPE) {
               let json = JSON.parse(await blob.text());
@@ -1217,7 +1118,7 @@ class ContactsManager extends ContentManager {
         {
           parent: this.container,
           name: contact.name,
-          kind: this.lib.ResourceKind.LEAF,
+          kind: this._lib.ResourceKind.LEAF,
           tags,
         },
         "default",
@@ -1281,7 +1182,7 @@ class ContainerManager extends ContentManager {
     if (!this.container) {
       this.container = await this.ensureTopLevelContainer(this.containerName);
       this.svc = await this.service;
-      this.lib = await this.lib();
+      this._lib = await this.lib();
       await this.ensureHttpKey(this.svc);
     }
   }
@@ -1290,9 +1191,9 @@ class ContainerManager extends ContentManager {
     // change format:
     // {kind:3, id:"9eac49dd-9c9f-4346-8dae-70012a14a938", parent:"24941cb3-b30f-4753-8fb3-119716913de2"}
     this.log(`list modified: ${JSON.stringify(change)}`);
-    if (change.kind == this.lib.ModificationKind.CHILD_CREATED) {
+    if (change.kind == this._lib.ModificationKind.CHILD_CREATED) {
       this.dispatchEvent(new CustomEvent("child-created", { detail: change }));
-    } else if (change.kind == this.lib.ModificationKind.CHILD_DELETED) {
+    } else if (change.kind == this._lib.ModificationKind.CHILD_DELETED) {
       this.dispatchEvent(new CustomEvent("child-deleted", { detail: change }));
     }
     return Promise.resolve();
@@ -1315,7 +1216,7 @@ class ContainerManager extends ContentManager {
       try {
         let children = await cursor.next();
         for (let child of children) {
-          if (child.kind === this.lib.ResourceKind.LEAF) {
+          if (child.kind === this._lib.ResourceKind.LEAF) {
             let blob = await this.svc.getVariant(child.id, "default");
             let resource = new ContentResource(
               this.svc,

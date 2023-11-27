@@ -31,6 +31,11 @@ function openSearchBox() {
   }
 }
 
+function isPrivateBrowsing() {
+  let elem = document.getElementById("private-browsing");
+  return elem.classList.contains("active");
+}
+
 // Helper to decide how to process an window.open url parameter.
 // Returns true if window.open() was called, false otherwise.
 function maybeOpenURL(url, details = {}) {
@@ -39,11 +44,19 @@ function maybeOpenURL(url, details = {}) {
     return false;
   }
 
+  details.privatebrowsing = isPrivateBrowsing();
+
   let isUrl = false;
   try {
     let a = new URL(url);
     isUrl = true;
   } catch (e) {}
+
+  if (url.startsWith("about:")) {
+    let act = new WebActivity("open-about", { url });
+    act.start();
+    return true;
+  }
 
   const isFileUrl = url.startsWith("file://");
   console.log(`maybeOpenURL isUrl=${isUrl} isFileUrl=${isFileUrl}`);

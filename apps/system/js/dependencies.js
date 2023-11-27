@@ -49,8 +49,15 @@ const kDeps = [
       "api daemon core",
       "battery helper",
       "actions dispatcher",
+      "mediacontroller comp",
       "shoelace-icon",
     ],
+  },
+  {
+    name: "wakeup comp",
+    kind: "module",
+    param: ["./components/wakeup_screen.js"],
+    deps: ["api daemon core", "battery helper", "shoelace-icon"],
   },
   {
     name: "notifications",
@@ -65,7 +72,7 @@ const kDeps = [
   {
     name: "late start",
     kind: "virtual",
-    deps: ["swproxy", "activity handler", "p2p"],
+    deps: ["swproxy", "activity handler", "p2p", "wakeup comp"],
   },
   {
     name: "swproxy",
@@ -78,10 +85,16 @@ const kDeps = [
     param: ["./js/activity_handler.js"],
   },
   {
+    name: "remote control",
+    kind: "script",
+    param: ["./js/remote_control.js"],
+    deps: ["api daemon core"],
+  },
+  {
     name: "p2p",
     kind: "script",
     param: ["./js/p2p.js"],
-    deps: ["api daemon core", "content manager", "tiles"],
+    deps: ["api daemon core", "content manager", "tiles", "remote control"],
   },
   {
     name: "tiles",
@@ -110,7 +123,12 @@ const kDeps = [
     name: "window manager",
     kind: "module",
     param: "./components/window_manager.js",
-    deps: ["content window", "shoelace-icon"],
+    deps: [
+      "content window",
+      "shoelace-icon",
+      "shoelace-button-group",
+      "shoelace-button",
+    ],
   },
   {
     name: "content window",
@@ -159,7 +177,12 @@ const kDeps = [
     name: "wallpaper",
     kind: "module",
     param: "./js/wallpaper_manager.js",
-    deps: ["content manager"],
+    deps: ["content manager", "vibrant"],
+  },
+  {
+    name: "vibrant",
+    kind: "script",
+    param: "./third-party/node-vibrant/vibrant.min.js",
   },
   {
     name: "ua store",
@@ -250,6 +273,7 @@ const kDeps = [
     param: ["./components/quick_settings.js"],
     deps: [
       "notification comp",
+      "mediacontroller comp",
       "webext comp",
       "api daemon core",
       "shoelace-icon",
@@ -289,6 +313,12 @@ const kDeps = [
     name: "notification comp",
     kind: "module",
     param: ["./components/notification.js", ["WebNotification"]],
+    deps: ["shoelace-icon", "lit element"],
+  },
+  {
+    name: "mediacontroller comp",
+    kind: "module",
+    param: ["./components/media_controller.js", ["MediaController"]],
     deps: ["shoelace-icon", "lit element"],
   },
   {

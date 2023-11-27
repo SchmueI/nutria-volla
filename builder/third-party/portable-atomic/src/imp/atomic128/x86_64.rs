@@ -8,7 +8,7 @@
 // - atomic-maybe-uninit https://github.com/taiki-e/atomic-maybe-uninit
 //
 // Generated asm:
-// - x86_64 (+cmpxchg16b) https://godbolt.org/z/KahrWeW9G
+// - x86_64 (+cmpxchg16b) https://godbolt.org/z/WPvfn16sY
 
 include!("macros.rs");
 
@@ -24,6 +24,8 @@ mod detect;
 #[cfg(not(portable_atomic_no_asm))]
 use core::arch::asm;
 use core::sync::atomic::Ordering;
+
+use crate::utils::{Pair, U128};
 
 // Asserts that the function is called in the correct context.
 macro_rules! debug_assert_cmpxchg16b {
@@ -59,23 +61,6 @@ macro_rules! ptr_modifier {
     () => {
         ""
     };
-}
-
-/// A 128-bit value represented as a pair of 64-bit values.
-///
-/// This type is `#[repr(C)]`, both fields have the same in-memory representation
-/// and are plain old datatypes, so access to the fields is always safe.
-#[derive(Clone, Copy)]
-#[repr(C)]
-union U128 {
-    whole: u128,
-    pair: Pair,
-}
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct Pair {
-    lo: u64,
-    hi: u64,
 }
 
 #[cfg_attr(
@@ -292,7 +277,7 @@ unsafe fn atomic_load_cmpxchg16b(src: *mut u128) -> u128 {
     // omitting the storing of condition flags and avoid use of xchg to handle rbx.
     unsafe {
         // cmpxchg16b is always SeqCst.
-        let (prev_lo, prev_hi);
+        let (out_lo, out_hi);
         macro_rules! cmpxchg16b {
             ($rdi:tt) => {
                 asm!(
@@ -304,8 +289,8 @@ unsafe fn atomic_load_cmpxchg16b(src: *mut u128) -> u128 {
                     // set old/new args of cmpxchg16b to 0 (rbx is zeroed after saved to rbx_tmp, to avoid xchg)
                     rbx_tmp = out(reg) _,
                     in("rcx") 0_u64,
-                    inout("rax") 0_u64 => prev_lo,
-                    inout("rdx") 0_u64 => prev_hi,
+                    inout("rax") 0_u64 => out_lo,
+                    inout("rdx") 0_u64 => out_hi,
                     in($rdi) src,
                     // Do not use `preserves_flags` because CMPXCHG16B modifies the ZF flag.
                     options(nostack),
@@ -316,7 +301,7 @@ unsafe fn atomic_load_cmpxchg16b(src: *mut u128) -> u128 {
         cmpxchg16b!("edi");
         #[cfg(target_pointer_width = "64")]
         cmpxchg16b!("rdi");
-        U128 { pair: Pair { lo: prev_lo, hi: prev_hi } }.whole
+        U128 { pair: Pair { lo: out_lo, hi: out_hi } }.whole
     }
 }
 
@@ -421,6 +406,7 @@ unsafe fn atomic_compare_exchange(
     }
 }
 
+// cmpxchg16b is always strong.
 use atomic_compare_exchange as atomic_compare_exchange_weak;
 
 #[cfg(any(target_feature = "cmpxchg16b", portable_atomic_target_feature = "cmpxchg16b"))]

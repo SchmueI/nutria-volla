@@ -10,6 +10,17 @@ class SwipeDetector extends EventTarget {
     this.startX = undefined;
     this.startY = undefined;
     this.startedAt = undefined;
+
+    let box = elem.getBoundingClientRect();
+
+    // Half the height of the box -> swipe detected in Y axis.
+    this.yTolerance = Math.round(box.height / 2) || 0;
+
+    // 0.5cm -> swipe detected in X axis.
+    let cm = (box.width * window.devicePixelRatio) / (96.0 * 2.56);
+    this.xTolerance = Math.round((box.width * 0.5) / cm) || 0;
+
+    this.log(`xTolerance=${this.xTolerance} yTolerance=${this.yTolerance}`);
   }
 
   log(msg) {
@@ -26,14 +37,14 @@ class SwipeDetector extends EventTarget {
       let dx = event.clientX - this.startX;
       let dy = event.clientY - this.startY;
 
-      let xTolerance = 70;
-      let yTolerance = 20;
-
       // this.log(`dx=${dx} dy=${dy} elapsed=${elapsed}`);
 
       if (elapsed > 500) {
         return;
       }
+
+      const xTolerance = this.xTolerance;
+      const yTolerance = this.yTolerance;
 
       if (dx < xTolerance && dx > -xTolerance && dy < -yTolerance) {
         // this.log("Swiped Up");
@@ -61,6 +72,9 @@ class StatusBar extends HTMLElement {
 
     this.shadow = this.attachShadow({ mode: "open" });
 
+    this.carouselIcon =
+      embedder.sessionType === "mobile" ? "layout-grid" : "columns";
+
     this.shadow.innerHTML = `
     <link rel="stylesheet" href="components/status_bar.css">
       <div class="container homescreen session-${embedder.sessionType}">
@@ -70,12 +84,12 @@ class StatusBar extends HTMLElement {
           <span class="left-text">Current page title that could be way too long to fit so we need to clip it some way.</span>
         </div>
         <div class="center">
-          <sl-icon name="layout-grid" class="quicklaunch homescreen-icon"></sl-icon>
+          <sl-icon name="circle-ellipsis" class="quicklaunch homescreen-icon"></sl-icon>
         </div>
         <div class="right">
-          <div class="frame-list homescreen-icon content-icon"></div>
-          <sl-icon name="columns" class="homescreen-icon"></sl-icon>
           <sl-icon name="chevron-left" class="go-back content-icon"></sl-icon>
+          <div class="frame-list homescreen-icon content-icon"></div>
+          <sl-icon name="${this.carouselIcon}" class="homescreen-icon"></sl-icon>
           <sl-icon name="home" class="content-icon"></sl-icon>
           <sl-badge pill variant="neutral">
              <sl-icon name="more-vertical" class="homescreen-icon content-icon"></sl-icon>
@@ -124,7 +138,7 @@ class StatusBar extends HTMLElement {
       actionsDispatcher.dispatch("go-home");
     };
 
-    let gridElem = this.getElem(`sl-icon[name="columns"]`);
+    let gridElem = this.getElem(`sl-icon[name="${this.carouselIcon}"]`);
     hapticFeedback.register(gridElem);
     gridElem.onclick = () => {
       actionsDispatcher.dispatch("open-carousel");
@@ -173,16 +187,8 @@ class StatusBar extends HTMLElement {
         actionsDispatcher.dispatch("open-url-editor", this.state.url);
       }
     };
-    const swipeDetector = new SwipeDetector(leftText);
-    swipeDetector.addEventListener("swipe-up", () => {
-      this.triggerCarousel();
-    });
-    swipeDetector.addEventListener("swipe-left", () => {
-      this.state.canGoBack && actionsDispatcher.dispatch("go-back");
-    });
-    swipeDetector.addEventListener("swipe-right", () => {
-      this.state.canGoForward && actionsDispatcher.dispatch("go-forward");
-    });
+
+    this.setupSwipeDetector();
 
     actionsDispatcher.addListener(
       "update-page-state",
@@ -215,19 +221,63 @@ class StatusBar extends HTMLElement {
       }
     });
 
+    actionsDispatcher.addListener("top-status-bar-changed", () => {
+      // forces an update.
+      this.updateState("", this.state);
+    });
+
     if (embedder.sessionType !== "mobile") {
       actionsDispatcher.addListener(
         "update-frame-list",
         this.updateFrameList.bind(this)
       );
       this.getElem(`.frame-list`).onclick = (event) => {
-        let id = event.target.getAttribute("id").split("-")[1];
-        if (this.isCarouselOpen) {
-          actionsDispatcher.dispatch("close-carousel");
+        let localName = event.target.localName;
+        let target = event.target;
+        switch (localName) {
+          case "img":
+            target = target.parentElement;
+          case "div":
+            let id = target.getAttribute("id").split("-")[1];
+            if (this.isCarouselOpen) {
+              actionsDispatcher.dispatch("close-carousel");
+            }
+            window.wm.switchToFrame(id);
+            break;
+          case "sl-icon":
+            // Toggle the muted state of the frame.
+            let frameId = target.parentElement.getAttribute("id").split("-")[1];
+            window.wm.toggleMutedState(frameId);
+            break;
+          default:
+            console.log(`Unexpected frame-list target: ${localName}`);
         }
-        window.wm.switchToFrame(id);
       };
     }
+  }
+
+  setupSwipeDetector() {
+    const swipeDetector = new SwipeDetector(this);
+    swipeDetector.addEventListener("swipe-down", () => {
+      if (this.isCarouselOpen) {
+        actionsDispatcher.dispatch("close-carousel");
+        actionsDispatcher.dispatch("go-home");
+      }
+    });
+    swipeDetector.addEventListener("swipe-up", () => {
+      if (this.isCarouselOpen) {
+        actionsDispatcher.dispatch("close-carousel");
+        actionsDispatcher.dispatch("go-home");
+      } else {
+        this.triggerCarousel();
+      }
+    });
+    swipeDetector.addEventListener("swipe-left", () => {
+      this.state.canGoBack && actionsDispatcher.dispatch("go-back");
+    });
+    swipeDetector.addEventListener("swipe-right", () => {
+      this.state.canGoForward && actionsDispatcher.dispatch("go-forward");
+    });
   }
 
   triggerCarousel() {
@@ -259,8 +309,18 @@ class StatusBar extends HTMLElement {
     let content = "";
     list.forEach((frame) => {
       let icon = frame.icon || window.config.brandLogo;
-      let iconClass = frame.id == this.currentActive ? `class="active"` : "";
-      content += `<img class="favicon" src="${icon}" ${iconClass} title="${frame.title}" alt="${frame.title}" id="shortcut-${frame.id}"/>`;
+      let iconClass = frame.id == this.currentActive ? "active" : "";
+      if (frame.isPlayingAudio) {
+        iconClass += " audio";
+      }
+      content += `<div class="${iconClass}" id="shortcut-${frame.id}">
+                    <img class="favicon" src="${icon}" title="${frame.title}" alt="${frame.title}"/>`;
+      if (frame.isPlayingAudio) {
+        content += `<sl-icon name="${
+          frame.audioMuted ? "volume-x" : "volume-1"
+        }" class="content-icon homescreen-icon"></sl-icon>`;
+      }
+      content += "</div>";
     });
     frames.innerHTML = content;
   }
@@ -269,8 +329,10 @@ class StatusBar extends HTMLElement {
     this.isCarouselOpen = true;
     this.getElem(".container").classList.add("carousel");
     this.getElem(`sl-icon[name="home"]`).classList.add("carousel");
-    this.getElem(`sl-icon[name="columns"]`).classList.add("hidden");
-    this.updateBackgroundColor("transparent");
+    this.getElem(`sl-icon[name="${this.carouselIcon}"]`).classList.add(
+      "hidden"
+    );
+    this.updateBackgroundColor("transparent", true);
     document.getElementById("status-top").classList.add("carousel");
   }
 
@@ -278,7 +340,9 @@ class StatusBar extends HTMLElement {
     this.isCarouselOpen = false;
     this.getElem(".container").classList.remove("carousel");
     this.getElem(`sl-icon[name="home"]`).classList.remove("carousel");
-    this.getElem(`sl-icon[name="columns"]`).classList.remove("hidden");
+    this.getElem(`sl-icon[name="${this.carouselIcon}"]`).classList.remove(
+      "hidden"
+    );
     document.getElementById("status-top").classList.remove("carousel");
   }
 
@@ -319,12 +383,15 @@ class StatusBar extends HTMLElement {
   updateDisplayState(state) {
     let display = state.display || "browser";
     let statustop = document.getElementById("status-top");
+    let screenElem = document.getElementById("screen");
     if (display === "fullscreen") {
       this.classList.add("fullscreen");
       statustop.classList.add("fullscreen");
+      screenElem.classList.add("fullscreen");
     } else {
       this.classList.remove("fullscreen");
       statustop.classList.remove("fullscreen");
+      screenElem.classList.remove("fullscreen");
     }
   }
 
@@ -345,15 +412,13 @@ class StatusBar extends HTMLElement {
       let url = new URL(state.url);
       isSecure =
         isSecure ||
+        url.protocol == "about:" ||
         url.protocol == "ipfs:" ||
         url.protocol == "ipns:" ||
         url.protocol == "tile:" ||
         url.protocol == "chrome:" ||
         url.protocol == "moz-extension:" ||
         url.hostname.endsWith(".localhost");
-
-      // about:blank is always secure.
-      isSecure = isSecure || state.url === "about:blank";
     }
 
     // Reader mode is secure
@@ -415,9 +480,24 @@ class StatusBar extends HTMLElement {
     }
   }
 
-  updateBackgroundColor(backgroundColor) {
+  updateBackgroundColor(backgroundColor, enterCarousel = false) {
     // Manage the backgroundColor, if any
     this.classList.remove("transparent");
+
+    if (this.state.privatebrowsing) {
+      this.style.backgroundColor = null;
+      if (enterCarousel) {
+        this.classList.remove("privatebrowsing");
+        this.setTopStatusBarBackground(null);
+        this.classList.add("transparent");
+      } else {
+        this.classList.add("privatebrowsing");
+      }
+      return;
+    } else {
+      this.classList.remove("privatebrowsing");
+    }
+
     if (backgroundColor) {
       let color = backgroundColor;
       if (color == "transparent") {
@@ -437,11 +517,6 @@ class StatusBar extends HTMLElement {
         .match(/rgba?\((.*)\)/)[1]
         .split(",")
         .map(Number);
-      let luminance =
-        (0.299 * rgba[0] + 0.587 * rgba[1] + 0.114 * rgba[2]) / 255;
-      console.log(
-        `Found background for ${color}: luminance=${luminance} red=${rgba[0]} green=${rgba[1]} blue=${rgba[2]}`
-      );
 
       // rgba detected transparent.
       if (rgba[3] == 0) {
@@ -450,8 +525,25 @@ class StatusBar extends HTMLElement {
         return;
       }
 
+      // See https://searchfox.org/mozilla-central/rev/8be17dcf81d9bd894c398b53282d43d782815967/widget/nsXPLookAndFeel.cpp#1286
+      let normalized = rgba.map((value) => {
+        value = value / 255.0;
+        if (value <= 0.03928) {
+          return value / 12.92;
+        }
+        return Math.pow((value + 0.055) / 1.055, 2.4);
+      });
+      const luminance =
+        0.2126 * normalized[0] +
+        0.7152 * normalized[1] +
+        0.0722 * normalized[2];
+      const high_luminance = luminance > 0.179129;
+      console.log(
+        `Found background for ${color}: luminance=${luminance} red=${rgba[0]} green=${rgba[1]} blue=${rgba[2]} high_luminance=${high_luminance}`
+      );
+
       // Set a class accordingly so that the theme can choose which colors to use.
-      if (luminance > 0.5) {
+      if (high_luminance) {
         this.classList.add("high-luminance");
         this.state.highLuminance = true;
       } else {
@@ -468,6 +560,10 @@ class StatusBar extends HTMLElement {
   }
 
   updateState(_name, state) {
+    if (this.isCarouselOpen) {
+      return;
+    }
+
     // We switched from homescreen <-> content, reorder the sections
     // so they get events properly.
     if (this.isHomescreen !== state.isHomescreen) {
@@ -483,9 +579,14 @@ class StatusBar extends HTMLElement {
       this.getElem(".container").classList.toggle("content");
     }
 
-    this.getElem(`.favicon`).src = state.isHomescreen
+    let favicon = this.getElem(`.favicon`);
+    favicon.src = state.isHomescreen
       ? ""
       : state.icon || window.config.brandLogo;
+
+    if (state.privatebrowsing) {
+      favicon.src = "resources/privatebrowsing.svg";
+    }
 
     // if (state.bringAttention) {
     //   this.getElem(`sl-icon[name="info"]`).classList.add("attention");
@@ -498,22 +599,22 @@ class StatusBar extends HTMLElement {
     // Update the frame list state.
     if (embedder.sessionType !== "mobile") {
       if (this.currentActive !== state.id) {
-        let selector = this.currentActiveId
-          ? `#shortcut-${this.currentActiveId}`
-          : `.frame-list img.active`;
+        let selector = this.currentActive
+          ? `#shortcut-${this.currentActive}`
+          : `.frame-list div.active`;
         let currentActive = this.shadowRoot.querySelector(selector);
         if (currentActive) {
           currentActive.classList.remove("active");
         }
       }
       let frameListElem = this.shadowRoot.querySelector(
-        `#shortcut-${state.id}`
+        `#shortcut-${state.id} img`
       );
       if (frameListElem) {
         frameListElem.src = state.icon || window.config.brandLogo;
         frameListElem.setAttribute("alt", state.title);
         frameListElem.setAttribute("title", state.title);
-        frameListElem.classList.add("active");
+        frameListElem.parentElement.classList.add("active");
       }
       this.currentActive = state.id;
     }

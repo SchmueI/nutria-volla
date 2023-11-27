@@ -1,5 +1,9 @@
 #![cfg_attr(not(all(test, feature = "float")), allow(dead_code, unused_macros))]
 
+#[macro_use]
+#[path = "gen/utils.rs"]
+mod gen;
+
 use core::sync::atomic::Ordering;
 
 macro_rules! static_assert {
@@ -42,7 +46,7 @@ macro_rules! doc_comment {
     target_arch = "aarch64",
     target_arch = "arm",
     target_arch = "powerpc64",
-    all(target_arch = "x86_64", not(target_env = "sgx")),
+    all(target_arch = "x86_64", not(any(target_env = "sgx", miri))),
 ))]
 macro_rules! ifunc {
     (unsafe fn($($arg_pat:ident: $arg_ty:ty),*) $(-> $ret_ty:ty)? { $($detect_body:tt)* }) => {{
@@ -75,7 +79,7 @@ macro_rules! ifunc {
     target_arch = "aarch64",
     target_arch = "arm",
     target_arch = "powerpc64",
-    all(target_arch = "x86_64", not(target_env = "sgx")),
+    all(target_arch = "x86_64", not(any(target_env = "sgx", miri))),
 ))]
 macro_rules! fn_alias {
     (
@@ -126,7 +130,7 @@ macro_rules! impl_debug_and_serde {
         impl fmt::Debug for $atomic_type {
             #[allow(clippy::missing_inline_in_public_items)] // fmt is not hot path
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                // std atomic types use Relaxed in Debug::fmt: https://github.com/rust-lang/rust/blob/1.69.0/library/core/src/sync/atomic.rs#L2023
+                // std atomic types use Relaxed in Debug::fmt: https://github.com/rust-lang/rust/blob/1.70.0/library/core/src/sync/atomic.rs#L2024
                 fmt::Debug::fmt(&self.load(Ordering::Relaxed), f)
             }
         }
@@ -157,7 +161,7 @@ macro_rules! impl_debug_and_serde {
 }
 
 // We do not provide `nand` because it cannot be optimized on neither x86 nor MSP430.
-// https://godbolt.org/z/x88voWGov
+// https://godbolt.org/z/7TzjKqYvE
 macro_rules! impl_default_no_fetch_ops {
     ($atomic_type:ident, bool) => {
         impl $atomic_type {
@@ -233,10 +237,23 @@ macro_rules! impl_default_bit_opts {
     };
 }
 
+// This just outputs the input as is, but can be used like an item-level block by using it with cfg.
+macro_rules! items {
+    ($($tt:tt)*) => {
+        $($tt)*
+    };
+}
+
 #[cfg(not(all(
-    target_arch = "mips",
     portable_atomic_no_atomic_load_store,
-    not(feature = "critical-section"),
+    not(any(
+        target_arch = "avr",
+        target_arch = "bpf",
+        target_arch = "msp430",
+        target_arch = "riscv32",
+        target_arch = "riscv64",
+        feature = "critical-section",
+    )),
 )))]
 #[macro_use]
 mod atomic_ptr_macros {
@@ -249,9 +266,15 @@ mod atomic_ptr_macros {
     }
 }
 #[cfg(all(
-    target_arch = "mips",
     portable_atomic_no_atomic_load_store,
-    not(feature = "critical-section"),
+    not(any(
+        target_arch = "avr",
+        target_arch = "bpf",
+        target_arch = "msp430",
+        target_arch = "riscv32",
+        target_arch = "riscv64",
+        feature = "critical-section",
+    )),
 ))]
 #[macro_use]
 mod atomic_ptr_macros {
@@ -263,9 +286,14 @@ mod atomic_ptr_macros {
 }
 
 #[cfg(not(all(
-    any(target_arch = "mips", target_arch = "bpf"),
     portable_atomic_no_atomic_load_store,
-    not(feature = "critical-section"),
+    not(any(
+        target_arch = "avr",
+        target_arch = "msp430",
+        target_arch = "riscv32",
+        target_arch = "riscv64",
+        feature = "critical-section",
+    )),
 )))]
 #[macro_use]
 mod atomic_8_16_macros {
@@ -285,9 +313,14 @@ mod atomic_8_16_macros {
     }
 }
 #[cfg(all(
-    any(target_arch = "mips", target_arch = "bpf"),
     portable_atomic_no_atomic_load_store,
-    not(feature = "critical-section"),
+    not(any(
+        target_arch = "avr",
+        target_arch = "msp430",
+        target_arch = "riscv32",
+        target_arch = "riscv64",
+        feature = "critical-section",
+    )),
 ))]
 #[macro_use]
 mod atomic_8_16_macros {
@@ -306,9 +339,14 @@ mod atomic_8_16_macros {
 #[cfg(all(
     any(not(target_pointer_width = "16"), feature = "fallback"),
     not(all(
-        any(target_arch = "mips", target_arch = "bpf"),
         portable_atomic_no_atomic_load_store,
-        not(feature = "critical-section"),
+        not(any(
+            target_arch = "avr",
+            target_arch = "msp430",
+            target_arch = "riscv32",
+            target_arch = "riscv64",
+            feature = "critical-section",
+        )),
     )),
 ))]
 #[macro_use]
@@ -324,9 +362,14 @@ mod atomic_32_macros {
 #[cfg(not(all(
     any(not(target_pointer_width = "16"), feature = "fallback"),
     not(all(
-        any(target_arch = "mips", target_arch = "bpf"),
         portable_atomic_no_atomic_load_store,
-        not(feature = "critical-section"),
+        not(any(
+            target_arch = "avr",
+            target_arch = "msp430",
+            target_arch = "riscv32",
+            target_arch = "riscv64",
+            feature = "critical-section",
+        )),
     )),
 )))]
 #[macro_use]
@@ -429,10 +472,11 @@ mod atomic_64_macros {
     not(feature = "fallback"),
     cfg(any(
         all(
-            any(not(portable_atomic_no_asm), portable_atomic_unstable_asm),
             target_arch = "aarch64",
+            any(not(portable_atomic_no_asm), portable_atomic_unstable_asm),
         ),
         all(
+            target_arch = "x86_64",
             any(not(portable_atomic_no_asm), portable_atomic_unstable_asm),
             any(
                 target_feature = "cmpxchg16b",
@@ -441,12 +485,12 @@ mod atomic_64_macros {
                     feature = "fallback",
                     not(portable_atomic_no_cmpxchg16b_target_feature),
                     not(portable_atomic_no_outline_atomics),
-                    not(target_env = "sgx"),
+                    not(any(target_env = "sgx", miri)),
                 ),
             ),
-            target_arch = "x86_64",
         ),
         all(
+            target_arch = "powerpc64",
             portable_atomic_unstable_asm_experimental_arch,
             any(
                 target_feature = "quadword-atomics",
@@ -460,18 +504,21 @@ mod atomic_64_macros {
                             target_os = "linux",
                             any(
                                 target_env = "gnu",
-                                all(target_env = "musl", not(target_feature = "crt-static")),
+                                all(
+                                    any(target_env = "musl", target_env = "ohos"),
+                                    not(target_feature = "crt-static"),
+                                ),
                                 portable_atomic_outline_atomics,
                             ),
                         ),
+                        target_os = "android",
                         target_os = "freebsd",
                     ),
                     not(any(miri, portable_atomic_sanitize_thread)),
                 ),
             ),
-            target_arch = "powerpc64",
         ),
-        all(portable_atomic_unstable_asm_experimental_arch, target_arch = "s390x"),
+        all(target_arch = "s390x", portable_atomic_unstable_asm_experimental_arch),
     ))
 )]
 #[cfg_attr(
@@ -508,10 +555,11 @@ mod atomic_128_macros {
     not(feature = "fallback"),
     cfg(not(any(
         all(
-            any(not(portable_atomic_no_asm), portable_atomic_unstable_asm),
             target_arch = "aarch64",
+            any(not(portable_atomic_no_asm), portable_atomic_unstable_asm),
         ),
         all(
+            target_arch = "x86_64",
             any(not(portable_atomic_no_asm), portable_atomic_unstable_asm),
             any(
                 target_feature = "cmpxchg16b",
@@ -520,12 +568,12 @@ mod atomic_128_macros {
                     feature = "fallback",
                     not(portable_atomic_no_cmpxchg16b_target_feature),
                     not(portable_atomic_no_outline_atomics),
-                    not(target_env = "sgx"),
+                    not(any(target_env = "sgx", miri)),
                 ),
             ),
-            target_arch = "x86_64",
         ),
         all(
+            target_arch = "powerpc64",
             portable_atomic_unstable_asm_experimental_arch,
             any(
                 target_feature = "quadword-atomics",
@@ -539,18 +587,21 @@ mod atomic_128_macros {
                             target_os = "linux",
                             any(
                                 target_env = "gnu",
-                                all(target_env = "musl", not(target_feature = "crt-static")),
+                                all(
+                                    any(target_env = "musl", target_env = "ohos"),
+                                    not(target_feature = "crt-static"),
+                                ),
                                 portable_atomic_outline_atomics,
                             ),
                         ),
+                        target_os = "android",
                         target_os = "freebsd",
                     ),
                     not(any(miri, portable_atomic_sanitize_thread)),
                 ),
             ),
-            target_arch = "powerpc64",
         ),
-        all(portable_atomic_unstable_asm_experimental_arch, target_arch = "s390x"),
+        all(target_arch = "s390x", portable_atomic_unstable_asm_experimental_arch),
     )))
 )]
 #[cfg_attr(
@@ -641,7 +692,7 @@ mod atomic_cas_macros {
     }
 }
 
-// https://github.com/rust-lang/rust/blob/1.69.0/library/core/src/sync/atomic.rs#L3156
+// https://github.com/rust-lang/rust/blob/1.70.0/library/core/src/sync/atomic.rs#L3155
 #[inline]
 #[cfg_attr(all(debug_assertions, not(portable_atomic_no_track_caller)), track_caller)]
 pub(crate) fn assert_load_ordering(order: Ordering) {
@@ -653,7 +704,7 @@ pub(crate) fn assert_load_ordering(order: Ordering) {
     }
 }
 
-// https://github.com/rust-lang/rust/blob/1.69.0/library/core/src/sync/atomic.rs#L3141
+// https://github.com/rust-lang/rust/blob/1.70.0/library/core/src/sync/atomic.rs#L3140
 #[inline]
 #[cfg_attr(all(debug_assertions, not(portable_atomic_no_track_caller)), track_caller)]
 pub(crate) fn assert_store_ordering(order: Ordering) {
@@ -665,7 +716,7 @@ pub(crate) fn assert_store_ordering(order: Ordering) {
     }
 }
 
-// https://github.com/rust-lang/rust/blob/1.69.0/library/core/src/sync/atomic.rs#L3226
+// https://github.com/rust-lang/rust/blob/1.70.0/library/core/src/sync/atomic.rs#L3221
 #[inline]
 #[cfg_attr(all(debug_assertions, not(portable_atomic_no_track_caller)), track_caller)]
 pub(crate) fn assert_compare_exchange_ordering(success: Ordering, failure: Ordering) {
@@ -695,6 +746,99 @@ pub(crate) fn upgrade_success_ordering(success: Ordering, failure: Ordering) -> 
         (Ordering::Release, Ordering::Acquire) => Ordering::AcqRel,
         (_, Ordering::SeqCst) => Ordering::SeqCst,
         _ => success,
+    }
+}
+
+#[cfg(any(
+    target_arch = "aarch64",
+    target_arch = "powerpc64",
+    target_arch = "s390x",
+    target_arch = "x86_64",
+))]
+pub(crate) use imp::Pair128 as Pair;
+#[allow(dead_code)]
+#[cfg(any(
+    target_arch = "aarch64",
+    target_arch = "powerpc64",
+    target_arch = "s390x",
+    target_arch = "x86_64",
+))]
+/// A 128-bit value represented as a pair of 64-bit values.
+///
+/// This type is `#[repr(C)]`, both fields have the same in-memory representation
+/// and are plain old data types, so access to the fields is always safe.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub(crate) union U128 {
+    pub(crate) whole: u128,
+    pub(crate) pair: Pair,
+}
+
+#[cfg(target_arch = "arm")]
+pub(crate) use imp::Pair64 as Pair;
+#[allow(dead_code)]
+#[cfg(target_arch = "arm")]
+/// A 64-bit value represented as a pair of 32-bit values.
+///
+/// This type is `#[repr(C)]`, both fields have the same in-memory representation
+/// and are plain old data types, so access to the fields is always safe.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub(crate) union U64 {
+    pub(crate) whole: u64,
+    pub(crate) pair: Pair,
+}
+
+// little endian order
+#[allow(dead_code)]
+#[cfg(any(target_endian = "little", target_arch = "aarch64", target_arch = "arm"))]
+mod imp {
+    #[cfg(target_arch = "arm")]
+    // A pair of 32-bit values.
+    #[derive(Clone, Copy)]
+    #[repr(C)]
+    pub(crate) struct Pair64 {
+        pub(crate) lo: u32,
+        pub(crate) hi: u32,
+    }
+    #[cfg(any(
+        target_arch = "aarch64",
+        target_arch = "powerpc64",
+        target_arch = "s390x",
+        target_arch = "x86_64",
+    ))]
+    // A pair of 64-bit values.
+    #[derive(Clone, Copy)]
+    #[repr(C)]
+    pub(crate) struct Pair128 {
+        pub(crate) lo: u64,
+        pub(crate) hi: u64,
+    }
+}
+// big endian order
+#[allow(dead_code)]
+#[cfg(not(any(target_endian = "little", target_arch = "aarch64", target_arch = "arm")))]
+mod imp {
+    #[cfg(target_arch = "arm")]
+    // A pair of 32-bit values.
+    #[derive(Clone, Copy)]
+    #[repr(C)]
+    pub(crate) struct Pair64 {
+        pub(crate) hi: u32,
+        pub(crate) lo: u32,
+    }
+    #[cfg(any(
+        target_arch = "aarch64",
+        target_arch = "powerpc64",
+        target_arch = "s390x",
+        target_arch = "x86_64",
+    ))]
+    // A pair of 64-bit values.
+    #[derive(Clone, Copy)]
+    #[repr(C)]
+    pub(crate) struct Pair128 {
+        pub(crate) hi: u64,
+        pub(crate) lo: u64,
     }
 }
 

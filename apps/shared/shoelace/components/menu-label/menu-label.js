@@ -1,1 +1,12 @@
-import{a}from"../../chunks/chunk.B2HMLA22.js";import"../../chunks/chunk.6LO6FWLR.js";import"../../chunks/chunk.IKUI3UUK.js";import"../../chunks/chunk.H53HRVH4.js";import"../../chunks/chunk.SYBSOZNG.js";import"../../chunks/chunk.I4CX4JT3.js";export{a as default};
+import {
+  menu_label_default
+} from "../../chunks/chunk.EMZVW7NJ.js";
+import "../../chunks/chunk.LYHKREWF.js";
+import "../../chunks/chunk.UUPFKID5.js";
+import "../../chunks/chunk.URBIOJXY.js";
+import "../../chunks/chunk.M2U2QT2K.js";
+import "../../chunks/chunk.27ILGUWR.js";
+import "../../chunks/chunk.YZETUBD6.js";
+export {
+  menu_label_default as default
+};

@@ -21,8 +21,8 @@ impl Version {
     // the rustc version, we assume this is the current version.
     // It is no problem if this is older than the actual latest stable.
     // LLVM version is assumed to be the minimum external LLVM version:
-    // https://github.com/rust-lang/rust/blob/1.69.0/src/bootstrap/native.rs#L571
-    pub(crate) const LATEST: Self = Self::stable(69, 14);
+    // https://github.com/rust-lang/rust/blob/1.71.0/src/bootstrap/llvm.rs#L529
+    pub(crate) const LATEST: Self = Self::stable(71, 14);
 
     pub(crate) const fn stable(rustc_minor: u32, llvm_major: u32) -> Self {
         Self { minor: rustc_minor, nightly: false, commit_date: Date::UNKNOWN, llvm: llvm_major }
@@ -87,14 +87,14 @@ impl Version {
                 }
                 Some(Date::new(year, month, day))
             })();
-            Some(Version {
+            Some(Self {
                 minor,
                 nightly,
                 commit_date: commit_date.unwrap_or(Date::UNKNOWN),
                 llvm: llvm_major,
             })
         } else {
-            Some(Version::stable(minor, llvm_major))
+            Some(Self::stable(minor, llvm_major))
         }
     }
 }

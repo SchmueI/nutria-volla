@@ -327,6 +327,8 @@ async function manageFTU() {
   try {
     await settings.set([{ name: "ftu.done", value: true }]);
     window.config.ftuDone = true;
+    // Unlock the lock screen when finishing the FTU.
+    window.lockscreen.unlock();
   } catch (e) {
     console.error(`Failed to register FTU as done: ${e}`);
   }
@@ -405,6 +407,28 @@ class TorProxyChannelFilter {
   }
 }
 
+function configureTopStatus() {
+  let enableTopStatus = Services.prefs.getBoolPref(
+    "ui.status-top.enabled",
+    false
+  );
+
+  if (window.config.topStatusBar === enableTopStatus) {
+    return;
+  }
+
+  window.config.topStatusBar = enableTopStatus;
+  if (!enableTopStatus) {
+    document.getElementById("screen").classList.remove("show-top-status-bar");
+  } else {
+    document.getElementById("screen").classList.add("show-top-status-bar");
+    let height = Services.prefs.getIntPref("ui.status-top-height", 26);
+    const rootElement = document.documentElement;
+    rootElement.style.setProperty("--status-top-height", `${height}px`);
+  }
+  window.actionsDispatcher?.dispatch("top-status-bar-changed", enableTopStatus);
+}
+
 document.addEventListener(
   "DOMContentLoaded",
   async () => {
@@ -412,14 +436,8 @@ document.addEventListener(
       `DOMContentLoaded, embedder is ${window.embedderSetupDone}`
     );
 
-    let enableTopStatus = Services.prefs.getBoolPref(
-      "ui.status-top.enabled",
-      false
-    );
-    window.config.topStatusBar = enableTopStatus;
-    if (!enableTopStatus) {
-      document.getElementById("screen").classList.add("no-top-status-bar");
-    }
+    configureTopStatus();
+    Services.prefs.addObserver("ui.status-top.enabled", configureTopStatus);
 
     // Make sure the embedding is setup.
     await window.embedderSetupDone;
@@ -453,6 +471,8 @@ document.addEventListener(
     await graph.waitForDeps("phase1");
     await graph.waitForDeps("launch");
 
+    await manageFTU();
+
     keyManager.registerShortPressAction(config.powerKey, "power");
     keyManager.registerLongPressAction(config.powerKey, "power");
     keyManager.registerShortPressAction("PrintScreen", "printscreen");
@@ -472,8 +492,6 @@ document.addEventListener(
     // The opensearch resources need to be ready before launching the FTU.
     let openSearch = contentManager.getOpenSearchManager();
     await openSearch.ready();
-
-    await manageFTU();
 
     window.onuserproximity = (event) => {
       console.log(`D/hal === userproximity event: near=${event.near}`);

@@ -1,3 +1,4 @@
+#![cfg_attr(read_buf, feature(read_buf))]
 //! Assorted public API tests.
 use std::cell::RefCell;
 use std::fmt;
@@ -181,6 +182,34 @@ fn check_read(reader: &mut dyn io::Read, bytes: &[u8]) {
     let mut buf = vec![0u8; bytes.len() + 1];
     assert_eq!(bytes.len(), reader.read(&mut buf).unwrap());
     assert_eq!(bytes, &buf[..bytes.len()]);
+}
+
+fn check_read_err(reader: &mut dyn io::Read, err_kind: io::ErrorKind) {
+    let mut buf = vec![0u8; 1];
+    let err = reader.read(&mut buf).unwrap_err();
+    assert!(matches!(err, err  if err.kind()  == err_kind))
+}
+
+#[cfg(read_buf)]
+fn check_read_buf(reader: &mut dyn io::Read, bytes: &[u8]) {
+    use std::{io::BorrowedBuf, mem::MaybeUninit};
+
+    let mut buf = [MaybeUninit::<u8>::uninit(); 128];
+    let mut buf: BorrowedBuf<'_> = buf.as_mut_slice().into();
+    reader.read_buf(buf.unfilled()).unwrap();
+    assert_eq!(buf.filled(), bytes);
+}
+
+#[cfg(read_buf)]
+fn check_read_buf_err(reader: &mut dyn io::Read, err_kind: io::ErrorKind) {
+    use std::{io::BorrowedBuf, mem::MaybeUninit};
+
+    let mut buf = [MaybeUninit::<u8>::uninit(); 1];
+    let mut buf: BorrowedBuf<'_> = buf.as_mut_slice().into();
+    let err = reader
+        .read_buf(buf.unfilled())
+        .unwrap_err();
+    assert!(matches!(err, err  if err.kind()  == err_kind))
 }
 
 #[test]
@@ -591,8 +620,10 @@ fn server_closes_uncleanly() {
         assert!(!io_state.peer_has_closed());
         check_read(&mut client.reader(), b"from-server!");
 
-        assert!(matches!(client.reader().read(&mut [0u8; 1]),
-                         Err(err) if err.kind() == io::ErrorKind::UnexpectedEof));
+        check_read_err(
+            &mut client.reader() as &mut dyn io::Read,
+            io::ErrorKind::UnexpectedEof,
+        );
 
         // may still transmit pending frames
         transfer(&mut client, &mut server);
@@ -634,8 +665,10 @@ fn client_closes_uncleanly() {
         assert!(!io_state.peer_has_closed());
         check_read(&mut server.reader(), b"from-client!");
 
-        assert!(matches!(server.reader().read(&mut [0u8; 1]),
-                         Err(err) if err.kind() == io::ErrorKind::UnexpectedEof));
+        check_read_err(
+            &mut server.reader() as &mut dyn io::Read,
+            io::ErrorKind::UnexpectedEof,
+        );
 
         // may still transmit pending frames
         transfer(&mut server, &mut client);
@@ -1020,6 +1053,56 @@ fn client_auth_works() {
 }
 
 #[test]
+fn client_mandatory_auth_revocation_works() {
+    for kt in ALL_KEY_TYPES.iter() {
+        // Create a server configuration that includes a CRL that specifies the client certificate
+        // is revoked.
+        let crls = vec![kt.client_crl()];
+        let server_config = Arc::new(make_server_config_with_mandatory_client_auth_crls(
+            *kt, crls,
+        ));
+
+        for version in rustls::ALL_VERSIONS {
+            let client_config = make_client_config_with_versions_with_auth(*kt, &[version]);
+            let (mut client, mut server) =
+                make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
+            // Because the client certificate is revoked, the handshake should fail.
+            let err = do_handshake_until_error(&mut client, &mut server);
+            assert_eq!(
+                err,
+                Err(ErrorFromPeer::Server(Error::InvalidCertificate(
+                    CertificateError::Revoked
+                )))
+            );
+        }
+    }
+}
+
+#[test]
+fn client_optional_auth_revocation_works() {
+    for kt in ALL_KEY_TYPES.iter() {
+        // Create a server configuration that includes a CRL that specifies the client certificate
+        // is revoked.
+        let crls = vec![kt.client_crl()];
+        let server_config = Arc::new(make_server_config_with_optional_client_auth(*kt, crls));
+
+        for version in rustls::ALL_VERSIONS {
+            let client_config = make_client_config_with_versions_with_auth(*kt, &[version]);
+            let (mut client, mut server) =
+                make_pair_for_arc_configs(&Arc::new(client_config), &server_config);
+            // Because the client certificate is revoked, the handshake should fail.
+            let err = do_handshake_until_error(&mut client, &mut server);
+            assert_eq!(
+                err,
+                Err(ErrorFromPeer::Server(Error::InvalidCertificate(
+                    CertificateError::Revoked
+                )))
+            );
+        }
+    }
+}
+
+#[test]
 fn client_error_is_sticky() {
     let (mut client, _) = make_pair(KeyType::Rsa);
     client
@@ -1241,6 +1324,8 @@ where
     fail_ok: bool,
     pub short_writes: bool,
     pub last_error: Option<rustls::Error>,
+    pub buffered: bool,
+    buffer: Vec<Vec<u8>>,
 }
 
 impl<'a, C, S> OtherSession<'a, C, S>
@@ -1256,7 +1341,15 @@ where
             fail_ok: false,
             short_writes: false,
             last_error: None,
+            buffered: false,
+            buffer: vec![],
         }
+    }
+
+    fn new_buffered(sess: &'a mut C) -> OtherSession<'a, C, S> {
+        let mut os = OtherSession::new(sess);
+        os.buffered = true;
+        os
     }
 
     fn new_fails(sess: &'a mut C) -> OtherSession<'a, C, S> {
@@ -1264,33 +1357,8 @@ where
         os.fail_ok = true;
         os
     }
-}
 
-impl<'a, C, S> io::Read for OtherSession<'a, C, S>
-where
-    C: DerefMut + Deref<Target = ConnectionCommon<S>>,
-    S: SideData,
-{
-    fn read(&mut self, mut b: &mut [u8]) -> io::Result<usize> {
-        self.reads += 1;
-        self.sess.write_tls(b.by_ref())
-    }
-}
-
-impl<'a, C, S> io::Write for OtherSession<'a, C, S>
-where
-    C: DerefMut + Deref<Target = ConnectionCommon<S>>,
-    S: SideData,
-{
-    fn write(&mut self, _: &[u8]) -> io::Result<usize> {
-        unreachable!()
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn write_vectored<'b>(&mut self, b: &[io::IoSlice<'b>]) -> io::Result<usize> {
+    fn flush_vectored(&mut self, b: &[io::IoSlice<'_>]) -> io::Result<usize> {
         let mut total = 0;
         let mut lengths = vec![];
         for bytes in b {
@@ -1323,6 +1391,48 @@ where
 
         self.writevs.push(lengths);
         Ok(total)
+    }
+}
+
+impl<'a, C, S> io::Read for OtherSession<'a, C, S>
+where
+    C: DerefMut + Deref<Target = ConnectionCommon<S>>,
+    S: SideData,
+{
+    fn read(&mut self, mut b: &mut [u8]) -> io::Result<usize> {
+        self.reads += 1;
+        self.sess.write_tls(b.by_ref())
+    }
+}
+
+impl<'a, C, S> io::Write for OtherSession<'a, C, S>
+where
+    C: DerefMut + Deref<Target = ConnectionCommon<S>>,
+    S: SideData,
+{
+    fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+        unreachable!()
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        if !self.buffer.is_empty() {
+            let buffer = mem::take(&mut self.buffer);
+            let slices = buffer
+                .iter()
+                .map(|b| io::IoSlice::new(b))
+                .collect::<Vec<_>>();
+            self.flush_vectored(&slices)?;
+        }
+        Ok(())
+    }
+
+    fn write_vectored(&mut self, b: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        if self.buffered {
+            self.buffer
+                .extend(b.iter().map(|s| s.to_vec()));
+            return Ok(b.iter().map(|s| s.len()).sum());
+        }
+        self.flush_vectored(b)
     }
 }
 
@@ -1374,6 +1484,19 @@ fn client_complete_io_for_handshake() {
 }
 
 #[test]
+fn buffered_client_complete_io_for_handshake() {
+    let (mut client, mut server) = make_pair(KeyType::Rsa);
+
+    assert!(client.is_handshaking());
+    let (rdlen, wrlen) = client
+        .complete_io(&mut OtherSession::new_buffered(&mut server))
+        .unwrap();
+    assert!(rdlen > 0 && wrlen > 0);
+    assert!(!client.is_handshaking());
+    assert!(!client.wants_write());
+}
+
+#[test]
 fn client_complete_io_for_handshake_eof() {
     let (mut client, _) = make_pair(KeyType::Rsa);
     let mut input = io::Cursor::new(Vec::new());
@@ -1402,6 +1525,35 @@ fn client_complete_io_for_write() {
             .unwrap();
         {
             let mut pipe = OtherSession::new(&mut server);
+            let (rdlen, wrlen) = client.complete_io(&mut pipe).unwrap();
+            assert!(rdlen == 0 && wrlen > 0);
+            println!("{:?}", pipe.writevs);
+            assert_eq!(pipe.writevs, vec![vec![42, 42]]);
+        }
+        check_read(
+            &mut server.reader(),
+            b"0123456789012345678901234567890123456789",
+        );
+    }
+}
+
+#[test]
+fn buffered_client_complete_io_for_write() {
+    for kt in ALL_KEY_TYPES.iter() {
+        let (mut client, mut server) = make_pair(*kt);
+
+        do_handshake(&mut client, &mut server);
+
+        client
+            .writer()
+            .write_all(b"01234567890123456789")
+            .unwrap();
+        client
+            .writer()
+            .write_all(b"01234567890123456789")
+            .unwrap();
+        {
+            let mut pipe = OtherSession::new_buffered(&mut server);
             let (rdlen, wrlen) = client.complete_io(&mut pipe).unwrap();
             assert!(rdlen == 0 && wrlen > 0);
             println!("{:?}", pipe.writevs);
@@ -1513,128 +1665,133 @@ fn server_complete_io_for_read() {
 
 #[test]
 fn client_stream_write() {
-    for kt in ALL_KEY_TYPES.iter() {
-        let (mut client, mut server) = make_pair(*kt);
-
-        {
-            let mut pipe = OtherSession::new(&mut server);
-            let mut stream = Stream::new(&mut client, &mut pipe);
-            assert_eq!(stream.write(b"hello").unwrap(), 5);
-        }
-        check_read(&mut server.reader(), b"hello");
-    }
+    test_client_stream_write(StreamKind::Ref);
+    test_client_stream_write(StreamKind::Owned);
 }
 
 #[test]
-fn client_streamowned_write() {
-    for kt in ALL_KEY_TYPES.iter() {
-        let (client, mut server) = make_pair(*kt);
+fn server_stream_write() {
+    test_server_stream_write(StreamKind::Ref);
+    test_server_stream_write(StreamKind::Owned);
+}
 
+#[derive(Debug, Copy, Clone)]
+enum StreamKind {
+    Owned,
+    Ref,
+}
+
+fn test_client_stream_write(stream_kind: StreamKind) {
+    for kt in ALL_KEY_TYPES.iter() {
+        let (mut client, mut server) = make_pair(*kt);
+        let data = b"hello";
         {
-            let pipe = OtherSession::new(&mut server);
-            let mut stream = StreamOwned::new(client, pipe);
-            assert_eq!(stream.write(b"hello").unwrap(), 5);
+            let mut pipe = OtherSession::new(&mut server);
+            let mut stream: Box<dyn Write> = match stream_kind {
+                StreamKind::Ref => Box::new(Stream::new(&mut client, &mut pipe)),
+                StreamKind::Owned => Box::new(StreamOwned::new(client, pipe)),
+            };
+            assert_eq!(stream.write(data).unwrap(), 5);
         }
-        check_read(&mut server.reader(), b"hello");
+        check_read(&mut server.reader(), data);
+    }
+}
+
+fn test_server_stream_write(stream_kind: StreamKind) {
+    for kt in ALL_KEY_TYPES.iter() {
+        let (mut client, mut server) = make_pair(*kt);
+        let data = b"hello";
+        {
+            let mut pipe = OtherSession::new(&mut client);
+            let mut stream: Box<dyn Write> = match stream_kind {
+                StreamKind::Ref => Box::new(Stream::new(&mut server, &mut pipe)),
+                StreamKind::Owned => Box::new(StreamOwned::new(server, pipe)),
+            };
+            assert_eq!(stream.write(data).unwrap(), 5);
+        }
+        check_read(&mut client.reader(), data);
     }
 }
 
 #[test]
 fn client_stream_read() {
-    for kt in ALL_KEY_TYPES.iter() {
-        let (mut client, mut server) = make_pair(*kt);
-
-        server
-            .writer()
-            .write_all(b"world")
-            .unwrap();
-
-        {
-            let mut pipe = OtherSession::new(&mut server);
-            let mut stream = Stream::new(&mut client, &mut pipe);
-            check_read(&mut stream, b"world");
-        }
-    }
-}
-
-#[test]
-fn client_streamowned_read() {
-    for kt in ALL_KEY_TYPES.iter() {
-        let (client, mut server) = make_pair(*kt);
-
-        server
-            .writer()
-            .write_all(b"world")
-            .unwrap();
-
-        {
-            let pipe = OtherSession::new(&mut server);
-            let mut stream = StreamOwned::new(client, pipe);
-            check_read(&mut stream, b"world");
-        }
-    }
-}
-
-#[test]
-fn server_stream_write() {
-    for kt in ALL_KEY_TYPES.iter() {
-        let (mut client, mut server) = make_pair(*kt);
-
-        {
-            let mut pipe = OtherSession::new(&mut client);
-            let mut stream = Stream::new(&mut server, &mut pipe);
-            assert_eq!(stream.write(b"hello").unwrap(), 5);
-        }
-        check_read(&mut client.reader(), b"hello");
-    }
-}
-
-#[test]
-fn server_streamowned_write() {
-    for kt in ALL_KEY_TYPES.iter() {
-        let (mut client, server) = make_pair(*kt);
-
-        {
-            let pipe = OtherSession::new(&mut client);
-            let mut stream = StreamOwned::new(server, pipe);
-            assert_eq!(stream.write(b"hello").unwrap(), 5);
-        }
-        check_read(&mut client.reader(), b"hello");
+    test_client_stream_read(StreamKind::Ref, ReadKind::Buf);
+    test_client_stream_read(StreamKind::Owned, ReadKind::Buf);
+    #[cfg(read_buf)]
+    {
+        test_client_stream_read(StreamKind::Ref, ReadKind::BorrowedBuf);
+        test_client_stream_read(StreamKind::Owned, ReadKind::BorrowedBuf);
     }
 }
 
 #[test]
 fn server_stream_read() {
-    for kt in ALL_KEY_TYPES.iter() {
-        let (mut client, mut server) = make_pair(*kt);
+    test_server_stream_read(StreamKind::Ref, ReadKind::Buf);
+    test_server_stream_read(StreamKind::Owned, ReadKind::Buf);
+    #[cfg(read_buf)]
+    {
+        test_server_stream_read(StreamKind::Ref, ReadKind::BorrowedBuf);
+        test_server_stream_read(StreamKind::Owned, ReadKind::BorrowedBuf);
+    }
+}
 
-        client
-            .writer()
-            .write_all(b"world")
-            .unwrap();
+#[derive(Debug, Copy, Clone)]
+enum ReadKind {
+    Buf,
+    #[cfg(read_buf)]
+    BorrowedBuf,
+}
 
-        {
-            let mut pipe = OtherSession::new(&mut client);
-            let mut stream = Stream::new(&mut server, &mut pipe);
-            check_read(&mut stream, b"world");
+fn test_stream_read(read_kind: ReadKind, mut stream: impl Read, data: &[u8]) {
+    match read_kind {
+        ReadKind::Buf => {
+            check_read(&mut stream, data);
+            check_read_err(&mut stream, io::ErrorKind::UnexpectedEof)
+        }
+        #[cfg(read_buf)]
+        ReadKind::BorrowedBuf => {
+            check_read_buf(&mut stream, data);
+            check_read_buf_err(&mut stream, io::ErrorKind::UnexpectedEof)
         }
     }
 }
 
-#[test]
-fn server_streamowned_read() {
+fn test_client_stream_read(stream_kind: StreamKind, read_kind: ReadKind) {
     for kt in ALL_KEY_TYPES.iter() {
-        let (mut client, server) = make_pair(*kt);
-
-        client
-            .writer()
-            .write_all(b"world")
-            .unwrap();
+        let (mut client, mut server) = make_pair(*kt);
+        let data = b"world";
+        server.writer().write_all(data).unwrap();
 
         {
-            let pipe = OtherSession::new(&mut client);
-            let mut stream = StreamOwned::new(server, pipe);
-            check_read(&mut stream, b"world");
+            let mut pipe = OtherSession::new(&mut server);
+            transfer_eof(&mut client);
+
+            let stream: Box<dyn Read> = match stream_kind {
+                StreamKind::Ref => Box::new(Stream::new(&mut client, &mut pipe)),
+                StreamKind::Owned => Box::new(StreamOwned::new(client, pipe)),
+            };
+
+            test_stream_read(read_kind, stream, data)
+        }
+    }
+}
+
+fn test_server_stream_read(stream_kind: StreamKind, read_kind: ReadKind) {
+    for kt in ALL_KEY_TYPES.iter() {
+        let (mut client, mut server) = make_pair(*kt);
+        let data = b"world";
+        client.writer().write_all(data).unwrap();
+
+        {
+            let mut pipe = OtherSession::new(&mut client);
+            transfer_eof(&mut server);
+
+            let stream: Box<dyn Read> = match stream_kind {
+                StreamKind::Ref => Box::new(Stream::new(&mut server, &mut pipe)),
+                StreamKind::Owned => Box::new(StreamOwned::new(server, pipe)),
+            };
+
+            test_stream_read(read_kind, stream, data)
         }
     }
 }
@@ -3868,6 +4025,69 @@ fn test_client_sends_helloretryrequest() {
         storage.ops()[8],
         ClientStorageOp::InsertTls13Ticket(_)
     ));
+}
+
+#[test]
+fn test_client_rejects_hrr_with_varied_session_id() {
+    use rustls::internal::msgs::handshake::SessionId;
+    let different_session_id = SessionId::random().unwrap();
+
+    let assert_client_sends_hello_with_secp384 = |msg: &mut Message| -> Altered {
+        if let MessagePayload::Handshake { parsed, encoded } = &mut msg.payload {
+            if let HandshakePayload::ClientHello(ch) = &mut parsed.payload {
+                let keyshares = ch
+                    .get_keyshare_extension()
+                    .expect("missing key share extension");
+                assert_eq!(keyshares.len(), 1);
+                assert_eq!(keyshares[0].group, rustls::NamedGroup::secp384r1);
+
+                ch.session_id = different_session_id;
+                *encoded = Payload::new(parsed.get_encoding());
+            }
+        }
+        Altered::InPlace
+    };
+
+    let assert_server_requests_retry_and_echoes_session_id = |msg: &mut Message| -> Altered {
+        if let MessagePayload::Handshake { parsed, .. } = &mut msg.payload {
+            if let HandshakePayload::HelloRetryRequest(hrr) = &mut parsed.payload {
+                let group = hrr.get_requested_key_share_group();
+                assert_eq!(group, Some(rustls::NamedGroup::X25519));
+
+                assert_eq!(hrr.session_id, different_session_id);
+            }
+        }
+        Altered::InPlace
+    };
+
+    // client prefers a secp384r1 key share, server only accepts x25519
+    let client_config = make_client_config_with_kx_groups(
+        KeyType::Rsa,
+        &[&rustls::kx_group::SECP384R1, &rustls::kx_group::X25519],
+    );
+
+    let server_config =
+        make_server_config_with_kx_groups(KeyType::Rsa, &[&rustls::kx_group::X25519]);
+
+    let (client, server) = make_pair_for_configs(client_config, server_config);
+    let (mut client, mut server) = (client.into(), server.into());
+    transfer_altered(
+        &mut client,
+        assert_client_sends_hello_with_secp384,
+        &mut server,
+    );
+    server.process_new_packets().unwrap();
+    transfer_altered(
+        &mut server,
+        assert_server_requests_retry_and_echoes_session_id,
+        &mut client,
+    );
+    assert_eq!(
+        client.process_new_packets(),
+        Err(Error::PeerMisbehaved(
+            PeerMisbehaved::IllegalHelloRetryRequestWithWrongSessionId
+        ))
+    );
 }
 
 #[cfg(feature = "tls12")]
